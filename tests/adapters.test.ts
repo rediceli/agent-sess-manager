@@ -1,8 +1,8 @@
-import { test, describe, expect, beforeAll, afterAll, afterEach } from "bun:test";
+import { test, describe, expect, beforeAll, afterAll } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdir, writeFile, readFile, rm, copyFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
+import { mkdirSync, existsSync } from "node:fs";
 import { OpenCodeAdapter } from "../src/adapters/opencode.ts";
 import { CodexAdapter } from "../src/adapters/codex.ts";
 import { ClaudeAdapter } from "../src/adapters/claude.ts";
@@ -10,12 +10,21 @@ import type { ExportManifest } from "../src/types.ts";
 
 const TMP = "/tmp/agent-session-test";
 
+// We set HOME to TMP so that getAgentDbPath() resolves to our test DBs
+const ORIGINAL_HOME = process.env.HOME || "";
+
 async function cleanTmp() {
   await rm(TMP, { recursive: true, force: true });
   await mkdir(TMP, { recursive: true });
 }
 
+function ensureDirFor(dbPath: string) {
+  const dir = join(dbPath, "..");
+  mkdirSync(dir, { recursive: true });
+}
+
 function createOpenCodeTestDb(dbPath: string): Database {
+  ensureDirFor(dbPath);
   const db = new Database(dbPath, { create: true });
   db.run("CREATE TABLE IF NOT EXISTS project (id TEXT PRIMARY KEY, worktree TEXT NOT NULL, vcs TEXT, name TEXT, icon_url TEXT, icon_color TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_initialized INTEGER, sandboxes TEXT NOT NULL, commands TEXT, icon_url_override TEXT)");
   db.run("CREATE TABLE IF NOT EXISTS session (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, title TEXT NOT NULL, version TEXT NOT NULL, share_url TEXT, summary_additions INTEGER, summary_deletions INTEGER, summary_files INTEGER, summary_diffs TEXT, revert TEXT, permission TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, time_compacting INTEGER, time_archived INTEGER, workspace_id TEXT, path TEXT, agent TEXT, model TEXT, cost REAL DEFAULT 0 NOT NULL, tokens_input INTEGER DEFAULT 0 NOT NULL, tokens_output INTEGER DEFAULT 0 NOT NULL, tokens_reasoning INTEGER DEFAULT 0 NOT NULL, tokens_cache_read INTEGER DEFAULT 0 NOT NULL, tokens_cache_write INTEGER DEFAULT 0 NOT NULL, FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE)");
@@ -33,76 +42,94 @@ function createOpenCodeTestDb(dbPath: string): Database {
 }
 
 function createCodexTestDb(dbPath: string): Database {
+  ensureDirFor(dbPath);
   const db = new Database(dbPath, { create: true });
   db.run("CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, source TEXT NOT NULL, model_provider TEXT NOT NULL, cwd TEXT NOT NULL, title TEXT NOT NULL, sandbox_policy TEXT NOT NULL DEFAULT '', approval_mode TEXT NOT NULL DEFAULT '', tokens_used INTEGER NOT NULL DEFAULT 0, has_user_event INTEGER NOT NULL DEFAULT 0, archived INTEGER NOT NULL DEFAULT 0, archived_at INTEGER, git_sha TEXT, git_branch TEXT, git_origin_url TEXT, cli_version TEXT NOT NULL DEFAULT '', first_user_message TEXT NOT NULL DEFAULT '', agent_nickname TEXT, agent_role TEXT, memory_mode TEXT NOT NULL DEFAULT 'enabled', model TEXT, reasoning_effort TEXT, agent_path TEXT, created_at_ms INTEGER, updated_at_ms INTEGER, thread_source TEXT, preview TEXT NOT NULL DEFAULT '')");
 
-  const rolloutPath = join(TMP, "codex-rollout.jsonl");
+  const rolloutPath = join(TMP, ".codex", "rollouts", "thread_test1.jsonl");
   db.run("INSERT INTO threads VALUES ('thread_test1', ?, 1000, 2000, 'cli', 'openai', '/test/codex', 'Test Thread', 'on-request', 'on-request', 500, 1, 0, NULL, NULL, NULL, NULL, '0.133.0', 'test input', NULL, NULL, 'enabled', 'gpt-5', NULL, NULL, 1000000, 2000000, NULL, '')", [rolloutPath]);
 
   return db;
 }
 
+// Set up test databases in expected paths under TMP, then set HOME=TMP
+beforeAll(async () => {
+  await cleanTmp();
+
+  // Create OpenCode test DB at ~/.local/share/opencode/opencode.db (relative to TMP)
+  const openCodeDbPath = join(TMP, ".local", "share", "opencode", "opencode.db");
+  const ocDb = createOpenCodeTestDb(openCodeDbPath);
+  ocDb.close();
+
+  // Create Codex test DB at ~/.codex/state_5.sqlite (relative to TMP)
+  const codexDbPath = join(TMP, ".codex", "state_5.sqlite");
+  const cxDb = createCodexTestDb(codexDbPath);
+  cxDb.close();
+
+  // Create Codex rollout JSONL
+  const rolloutDir = join(TMP, ".codex", "rollouts");
+  await mkdir(rolloutDir, { recursive: true });
+  const rolloutContent = [
+    JSON.stringify({ timestamp: "2026-05-25T01:00:00.000Z", type: "session_meta", payload: { id: "thread_test1", cwd: "/test/codex", cli_version: "0.133.0" } }),
+    JSON.stringify({ timestamp: "2026-05-25T01:00:01.000Z", type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Hello Codex" }] } }),
+    JSON.stringify({ timestamp: "2026-05-25T01:00:02.000Z", type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Hi from Codex!" }] } }),
+  ].join("\n");
+  await writeFile(join(rolloutDir, "thread_test1.jsonl"), rolloutContent);
+
+  // Create Claude test data at ~/.claude/projects/<project>/<sessionId>.jsonl
+  const claudeDir = join(TMP, ".claude", "projects", "-test-claude");
+  await mkdir(claudeDir, { recursive: true });
+  const jsonlContent = [
+    JSON.stringify({ type: "user", sessionId: "claude_test1", message: { role: "user", content: "Hello Claude" }, timestamp: new Date().toISOString() }),
+    JSON.stringify({ type: "assistant", sessionId: "claude_test1", message: { role: "assistant", content: [{ type: "text", text: "Hi!" }] }, timestamp: new Date().toISOString() }),
+  ].join("\n");
+  await writeFile(join(claudeDir, "claude_test1.jsonl"), jsonlContent);
+
+  // Redirect HOME so all adapters resolve to test data
+  process.env.HOME = TMP;
+});
+
+afterAll(async () => {
+  process.env.HOME = ORIGINAL_HOME;
+  await cleanTmp();
+});
+
 describe("OpenCode Adapter", () => {
-  let db: Database;
-  const dbPath = join(TMP, "opencode-test.db");
-  const originalDbPath: string = process.env.HOME + "/.local/share/opencode/opencode.db";
-
-  beforeAll(async () => {
-    await cleanTmp();
-    db = createOpenCodeTestDb(dbPath);
-    db.close();
-  });
-
-  afterAll(async () => {
-    await cleanTmp();
-  });
-
   test("list returns sessions", async () => {
     const adapter = new OpenCodeAdapter();
-    const origGetPath = adapter["getDataRoot"];
-    adapter["getDataRoot"] = () => TMP;
     const result = await adapter.list({ limit: 10 });
-    expect(result.length).toBeGreaterThanOrEqual(0);
+    expect(result.length).toBeGreaterThanOrEqual(1);
+    expect(result[0]!.id).toBe("ses_test1");
   });
 
   test("show returns session detail", async () => {
     const adapter = new OpenCodeAdapter();
-    try {
-      const result = await adapter.show("ses_test1");
-      expect(result.meta.id).toBe("ses_test1");
-      expect(result.meta.cwd).toBe("/test/project");
-    } catch (e) {
-      expect((e as Error).message).toContain("Session not found");
-    }
+    const result = await adapter.show("ses_test1");
+    expect(result.meta.id).toBe("ses_test1");
+    expect(result.meta.cwd).toBe("/test/project");
   });
 
   test("export and import round-trip (fork mode)", async () => {
     const exportDir = join(TMP, "export-opencode");
     const adapter = new OpenCodeAdapter();
 
-    try {
-      await adapter.exportSession("ses_test1", { output: exportDir });
+    await adapter.exportSession("ses_test1", { output: exportDir });
 
-      expect(existsSync(join(exportDir, "manifest.json"))).toBe(true);
-      expect(existsSync(join(exportDir, "session-data", "session.json"))).toBe(true);
-      expect(existsSync(join(exportDir, "session-data", "messages.json"))).toBe(true);
+    expect(existsSync(join(exportDir, "manifest.json"))).toBe(true);
+    expect(existsSync(join(exportDir, "session-data", "session.json"))).toBe(true);
+    expect(existsSync(join(exportDir, "session-data", "messages.json"))).toBe(true);
 
-      const manifest = JSON.parse(await readFile(join(exportDir, "manifest.json"), "utf-8")) as ExportManifest;
-      expect(manifest.agent).toBe("opencode");
-      expect(manifest.sessionId).toBe("ses_test1");
+    const manifest = JSON.parse(await readFile(join(exportDir, "manifest.json"), "utf-8")) as ExportManifest;
+    expect(manifest.agent).toBe("opencode");
+    expect(manifest.sessionId).toBe("ses_test1");
 
-      const importResult = await adapter.importSession({
-        bundlePath: exportDir,
-        onConflict: "fork",
-        dryRun: true,
-      });
+    const importResult = await adapter.importSession({
+      bundlePath: exportDir,
+      onConflict: "fork",
+      dryRun: true,
+    });
 
-      expect(importResult.success).toBe(true);
-    } catch (_e) {
-      if ((_e as Error).message.includes("Session not found")) return;
-      if ((_e as Error).message.includes("database is locked")) return;
-      throw _e;
-    }
+    expect(importResult.success).toBe(true);
   });
 
   test("import detects missing manifest", async () => {
@@ -117,21 +144,6 @@ describe("OpenCode Adapter", () => {
 });
 
 describe("Claude Adapter", () => {
-  beforeAll(async () => {
-    await cleanTmp();
-    const claudeDir = join(TMP, "claude", "projects", "-test-claude");
-    await mkdir(claudeDir, { recursive: true });
-    const jsonlContent = [
-      JSON.stringify({ type: "user", sessionId: "claude_test1", message: { role: "user", content: "Hello Claude" }, timestamp: new Date().toISOString() }),
-      JSON.stringify({ type: "assistant", sessionId: "claude_test1", message: { role: "assistant", content: [{ type: "text", text: "Hi!" }] }, timestamp: new Date().toISOString() }),
-    ].join("\n");
-    await writeFile(join(claudeDir, "claude_test1.jsonl"), jsonlContent);
-  });
-
-  afterAll(async () => {
-    await cleanTmp();
-  });
-
   test("import detects missing manifest", async () => {
     const adapter = new ClaudeAdapter();
     const result = await adapter.importSession({
@@ -166,24 +178,11 @@ describe("Claude Adapter", () => {
 });
 
 describe("Codex Adapter", () => {
-  let db: Database;
-
-  beforeAll(async () => {
-    await cleanTmp();
-    const codexDbPath = join(TMP, "codex-test.sqlite");
-    db = createCodexTestDb(codexDbPath);
-    db.close();
-
-    const rolloutContent = [
-      JSON.stringify({ timestamp: "2026-05-25T01:00:00.000Z", type: "session_meta", payload: { id: "thread_test1", cwd: "/test/codex", cli_version: "0.133.0" } }),
-      JSON.stringify({ timestamp: "2026-05-25T01:00:01.000Z", type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Hello Codex" }] } }),
-      JSON.stringify({ timestamp: "2026-05-25T01:00:02.000Z", type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: "Hi from Codex!" }] } }),
-    ].join("\n");
-    await writeFile(join(TMP, "codex-rollout.jsonl"), rolloutContent);
-  });
-
-  afterAll(async () => {
-    await cleanTmp();
+  test("list returns sessions", async () => {
+    const adapter = new CodexAdapter();
+    const result = await adapter.list({ limit: 10 });
+    expect(result.length).toBeGreaterThanOrEqual(1);
+    expect(result[0]!.id).toBe("thread_test1");
   });
 
   test("import detects missing manifest", async () => {
