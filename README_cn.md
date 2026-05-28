@@ -6,20 +6,52 @@ OpenCode、Claude CLI 和 Codex CLI 的统一会话管理命令行工具。支�
 
 ## 安装
 
+### 一键安装（推荐）
+
+无需 git clone，只需运行：
+
 ```bash
-bun install
+curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/install.sh | bash
 ```
+
+自动下载最新版本、安装依赖，并将 `agent-session` 链接到 `/usr/local/bin`。
+
+自定义安装路径：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/install.sh | AGENT_SESSION_HOME=~/.local/agent-session bash
+```
+
+安装指定版本：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/install.sh | bash -s v0.1.0
+```
+
+### 从 git clone 安装
+
+```bash
+git clone https://github.com/rediceli/agent-sess-manager.git
+cd agent-sess-manager
+bun install
+bun link
+```
+
+链接后 `agent-session` 即可全局使用。
+
+### 直接运行（免安装）
+
+```bash
+bunx --bun agent-ss-mng <命令> [选项]
+```
+
+### 前置条件
+
+- [Bun](https://bun.sh) >= 1.3（安装：`curl -fsSL https://bun.sh/install | bash`）
 
 ## 使用
 
 ```bash
-bun run src/cli.ts <命令> [选项]
-```
-
-或者全局链接：
-
-```bash
-bun link
 agent-session <命令> [选项]
 ```
 
@@ -149,3 +181,7 @@ bun test
 
 - Bun >= 1.3
 - 已安装 OpenCode、Claude CLI 或 Codex CLI（用于访问实际数据）
+
+## 持续集成
+
+[![CI](https://github.com/rediceli/agent-sess-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/rediceli/agent-sess-manager/actions/workflows/ci.yml)

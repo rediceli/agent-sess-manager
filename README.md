@@ -6,20 +6,52 @@ Unified session management CLI for OpenCode, Claude CLI, and Codex CLI. Query, v
 
 ## Install
 
+### One-click install (recommended)
+
+No git clone needed — just run:
+
 ```bash
-bun install
+curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/install.sh | bash
 ```
+
+This downloads the latest release, installs dependencies, and links `agent-session` to `/usr/local/bin`.
+
+Custom install location:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/install.sh | AGENT_SESSION_HOME=~/.local/agent-session bash
+```
+
+Install a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/install.sh | bash -s v0.1.0
+```
+
+### From git clone
+
+```bash
+git clone https://github.com/rediceli/agent-sess-manager.git
+cd agent-sess-manager
+bun install
+bun link
+```
+
+After linking, `agent-session` is available globally.
+
+### Run directly (no install)
+
+```bash
+bunx --bun agent-ss-mng <command> [options]
+```
+
+### Prerequisites
+
+- [Bun](https://bun.sh) >= 1.3 (`curl -fsSL https://bun.sh/install | bash`)
 
 ## Usage
 
 ```bash
-bun run src/cli.ts <command> [options]
-```
-
-Or link globally:
-
-```bash
-bun link
 agent-session <command> [options]
 ```
 
@@ -148,3 +180,7 @@ bun test
 
 - Bun >= 1.3
 - OpenCode, Claude CLI, or Codex CLI installed (for live data access)
+
+## CI
+
+[![CI](https://github.com/rediceli/agent-sess-manager/actions/workflows/ci.yml/badge.svg)](https://github.com/rediceli/agent-sess-manager/actions/workflows/ci.yml)
