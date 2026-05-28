@@ -1,0 +1,28 @@
+{
+  "name": "agent-ss-mng",
+  "version": "0.1.0",
+  "description": "Unified session management tool for OpenCode, Claude CLI, and Codex CLI",
+  "module": "src/index.ts",
+  "type": "module",
+  "bin": {
+    "agent-session": "src/cli.ts"
+  },
+  "scripts": {
+    "dev": "bun run --watch src/cli.ts",
+    "build": "bun build src/cli.ts --outdir dist --target bun",
+    "test": "bun test"
+  },
+  "private": true,
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/bun": "latest",
+    "@types/glob": "^9.0.0",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "glob": "^13.0.6"
+  }
+}
