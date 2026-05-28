@@ -1,4 +1,4 @@
-import { Database } from "bun:sqlite";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import type { AgentType } from "../types.ts";
 
 export function openSqliteReadOnly(path: string): Database {
@@ -14,13 +14,13 @@ export function runInsert(db: Database, table: string, row: Record<string, unkno
   const placeholders = keys.map(() => "?").join(", ");
   const sql = `INSERT OR REPLACE INTO ${table} (${keys.join(", ")}) VALUES (${placeholders})`;
   const stmt = db.prepare(sql);
-  stmt.run(...keys.map((k) => row[k]));
+  stmt.run(...keys.map((k) => row[k] as SQLQueryBindings));
 }
 
 export function queryAll<T = Record<string, unknown>>(
   db: Database,
   sql: string,
-  params?: unknown[]
+  params?: SQLQueryBindings[]
 ): T[] {
   const stmt = db.prepare(sql);
   if (params && params.length > 0) {
@@ -32,7 +32,7 @@ export function queryAll<T = Record<string, unknown>>(
 export function queryOne<T = Record<string, unknown>>(
   db: Database,
   sql: string,
-  params?: unknown[]
+  params?: SQLQueryBindings[]
 ): T | undefined {
   const stmt = db.prepare(sql);
   if (params && params.length > 0) {

@@ -18,6 +18,7 @@ import type {
   DeleteResult,
 } from "../types.ts";
 import { openSqliteReadOnly, openSqliteReadWrite, runInsert, queryAll, queryOne, getAgentDbPath, getAgentDataRoot } from "../utils/db.ts";
+import type { SQLQueryBindings } from "bun:sqlite";
 import { dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256, ensureDir } from "../utils/fs.ts";
 import { join, basename, dirname, relative } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
@@ -77,8 +78,7 @@ export class OpenCodeAdapter implements SessionAdapter {
   readonly agentType = AGENT;
 
   isAvailable(): boolean {
-    const dbPath = getAgentDbPath(AGENT);
-    return fileExists(dbPath).then ? true : false;
+    try { return !!getAgentDbPath(AGENT); } catch { return false; }
   }
 
   async isAvailableAsync(): Promise<boolean> {
@@ -95,7 +95,7 @@ export class OpenCodeAdapter implements SessionAdapter {
     const db = openSqliteReadOnly(getAgentDbPath(AGENT));
     try {
       let sql = "SELECT * FROM session";
-      const params: unknown[] = [];
+      const params: SQLQueryBindings[] = [];
 
       if (options?.cwd) {
         sql += " WHERE directory LIKE ?";
@@ -183,12 +183,13 @@ export class OpenCodeAdapter implements SessionAdapter {
                 textContent += partData.text;
               } else if (type === "thinking" && typeof partData.thinking === "string") {
                 thinking += partData.thinking;
-              } else if (type === "tool-invocation" && options?.includeTools !== false) {
-                toolParts.push({
-                  name: (partData.toolName as string) || (partData.tool as Record<string, unknown>)?.name as string || "unknown",
-                  input: JSON.stringify(partData.tool?.input || partData.toolInput || {}, null, 2),
-                  output: JSON.stringify(partData.tool?.output || partData.toolOutput || "", null, 2),
-                });
+      } else if (type === "tool-invocation" && options?.includeTools !== false) {
+          const toolObj = (partData.tool ?? {}) as Record<string, unknown>;
+          toolParts.push({
+            name: (partData.toolName as string) || (toolObj.name as string) || "unknown",
+            input: JSON.stringify(toolObj.input || partData.toolInput || {}, null, 2),
+            output: JSON.stringify(toolObj.output || partData.toolOutput || "", null, 2),
+          });
               }
             } catch {
               continue;
@@ -201,9 +202,11 @@ export class OpenCodeAdapter implements SessionAdapter {
             timestamp: msToIso(msgRow.time_created),
             model: msgData.modelID as string | undefined,
             thinking: options?.includeThinking ? thinking || undefined : undefined,
-            tokens: (msgData.tokens as Record<string, number>)?.input
-              ? (msgData.tokens as Record<string, number>).input + (msgData.tokens as Record<string, number>).output
-              : undefined,
+        tokens: (() => {
+            const t = msgData.tokens as Record<string, number> | undefined;
+            if (t && t.input != null) return t.input + (t.output ?? 0);
+            return undefined;
+          })(),
           });
 
           if (options?.includeTools !== false) {

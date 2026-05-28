@@ -256,9 +256,9 @@ export class ClaudeAdapter implements SessionAdapter {
           const subCandidate = join(projectsDir, projectDir, sub);
           if (await fileExists(subCandidate)) {
             const content = await readFile(subCandidate, "utf-8");
-            const firstLine = content.split("\n")[0];
-            try {
-              const entry = JSON.parse(firstLine);
+          const firstLine = content.split("\n")[0] ?? "";
+          try {
+            const entry = JSON.parse(firstLine);
               if (entry.sessionId === sessionId) return subCandidate;
             } catch { continue; }
           }
@@ -290,7 +290,7 @@ export class ClaudeAdapter implements SessionAdapter {
 
       for (let i = 0; i < lines.length; i++) {
         try {
-          const entry: ClaudeJsonlEntry = JSON.parse(lines[i]);
+          const entry: ClaudeJsonlEntry = JSON.parse(lines[i] ?? "");
           if (entry.sessionId) sessionId = entry.sessionId;
 
           const text = extractTextContent(entry.message?.content || "");

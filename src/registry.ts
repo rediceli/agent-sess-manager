@@ -41,6 +41,6 @@ export async function resolveSessionId(agent: AgentType, partialId: string): Pro
   const sessions = await adapter.list({ limit: 9999 });
   const matches = sessions.filter((s) => s.id.startsWith(partialId));
   if (matches.length === 0) throw new Error(`No session found matching prefix: ${partialId}`);
-  if (matches.length === 1) return matches[0].id;
-  throw new Error(`Ambiguous prefix "${partialId}" matches ${matches.length} sessions:\n${matches.map((s) => `  ${s.id} — ${s.title}`).join("\n")}`);
+  if (matches.length === 1) return matches[0]!.id;
+  throw new Error(`Ambiguous prefix "${partialId}" matches ${matches.length} sessions:\n${matches.map((s: SessionMeta) => `  ${s.id} — ${s.title}`).join("\n")}`);
 }

@@ -31,10 +31,10 @@ export async function psCommand() {
     return;
   }
 
-  const output = new Response(proc.stdout).text();
+  const output = await new Response(proc.stdout).text();
   const lines = output.split("\n").filter(Boolean);
 
-  const agentSessions = lines.filter((l) => l.startsWith("agent-"));
+  const agentSessions = lines.filter((l: string) => l.startsWith("agent-"));
 
   if (agentSessions.length === 0) {
     console.log(chalk.dim("No agent tmux sessions found."));
@@ -45,12 +45,13 @@ export async function psCommand() {
   console.log(chalk.dim("  ──────────────────────────────────────────────"));
 
   for (const line of agentSessions) {
-    const [name, ...rest] = line.split(":");
+    const [nameRaw, ...rest] = line.split(":");
+    const name = nameRaw ?? "";
     const status = rest.join(":").trim();
     const parts = name.replace("agent-", "").split("-");
     const agentName = parts[0] || "unknown";
 
-    console.log(`  ${chalk.cyan(name.padEnd(28))} ${agentName.padEnd(10)} ${status}`);
+    console.log(` ${chalk.cyan(name.padEnd(28))} ${agentName.padEnd(10)} ${status}`);
   }
 }
 

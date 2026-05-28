@@ -22,6 +22,7 @@ import type { Database } from "bun:sqlite";
 import { dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256, ensureDir } from "../utils/fs.ts";
 import { join, basename, dirname, relative } from "node:path";
 import { readFile, writeFile, readdir, stat, copyFile, mkdir, rm } from "node:fs/promises";
+import type { SQLQueryBindings } from "bun:sqlite";
 import { glob } from "glob";
 
 const AGENT: AgentType = "codex";
@@ -31,6 +32,8 @@ interface CodexThreadRow {
   rollout_path: string;
   created_at: number;
   updated_at: number;
+  created_at_ms?: number;
+  updated_at_ms?: number;
   source: string;
   model_provider: string;
   cwd: string;
@@ -100,7 +103,7 @@ export class CodexAdapter implements SessionAdapter {
     const db = openSqliteReadOnly(getAgentDbPath(AGENT));
     try {
       let sql = "SELECT * FROM threads WHERE archived = 0";
-      const params: unknown[] = [];
+      const params: SQLQueryBindings[] = [];
 
       if (options?.cwd) {
         sql += " AND cwd LIKE ?";
@@ -248,14 +251,14 @@ export class CodexAdapter implements SessionAdapter {
 
         const messages = await this.parseRollout(thread.rollout_path);
         for (let i = 0; i < messages.length; i++) {
-          const msg = messages[i];
+          const msg = messages[i]!;
           if (!msg.content) continue;
 
           const matches = pattern
             ? pattern.test(msg.content)
             : options.caseSensitive
-              ? msg.content.includes(options.query)
-              : msg.content.toLowerCase().includes(options.query.toLowerCase());
+            ? msg.content.includes(options.query)
+            : msg.content.toLowerCase().includes(options.query.toLowerCase());
 
           if (matches) {
             results.push({
