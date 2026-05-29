@@ -31,9 +31,9 @@ VERSION="${1:-latest}"
 if [ "$VERSION" != "latest" ]; then
   TAG="$VERSION"
 else
-  TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+  TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
   if [ -z "$TAG" ]; then
-    TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/tags" 2>/dev/null | grep '"name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+    TAG=$(curl -fsSL "https://api.github.com/repos/${REPO}/tags" 2>/dev/null | grep '"name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
   fi
   if [ -z "$TAG" ]; then
     warn "Could not detect latest release, falling back to main branch"
@@ -64,9 +64,12 @@ bun install --production
 
 cp -r . "$INSTALL_DIR/"
 
-cat > "$INSTALL_DIR/bin/agent-session" << 'WRAPPER'
+mkdir -p "$INSTALL_DIR/bin"
+cat > "$INSTALL_DIR/bin/agent-session" << WRAPPER
 #!/usr/bin/env bash
-exec bun run "${AGENT_SESSION_HOME:-$HOME/.agent-session}/src/cli.ts" "$@"
+SELF_PATH="\$(readlink -f "\$0" 2>/dev/null || echo "\$0")"
+SELF_DIR="\$(cd "\$(dirname "\$SELF_PATH")/.." && pwd)"
+exec bun run "\${AGENT_SESSION_HOME:-\$SELF_DIR}/src/cli.ts" "\$@"
 WRAPPER
 chmod +x "$INSTALL_DIR/bin/agent-session"
 
@@ -83,7 +86,8 @@ else
 fi
 
 if command -v agent-session >/dev/null 2>&1; then
-  ok "agent-session $(agent-session --version 2>/dev/null || echo '') installed successfully!"
+  ok "agent-session installed successfully!"
+  agent-session --help 2>/dev/null | head -3 || true
 else
   ok "Installation complete. Restart your shell or run:"
   echo ""
