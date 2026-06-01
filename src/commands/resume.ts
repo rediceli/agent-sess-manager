@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import type { AgentType } from "../types.ts";
-import { getAdapter } from "../registry.ts";
+import { getAdapter, resolveSessionId } from "../registry.ts";
 
 export async function resumeCommand(
   sessionId: string,
@@ -12,11 +12,12 @@ export async function resumeCommand(
     fork?: boolean;
   }
 ) {
-  const adapter = getAdapter(options.agent as AgentType);
+  const agent = options.agent as AgentType;
+  const fullId = await resolveSessionId(agent, sessionId);
 
-  console.log(chalk.dim(`Resuming ${options.agent} session ${sessionId}...`));
+  console.log(chalk.dim(`Resuming ${options.agent} session ${fullId}...`));
 
-  await adapter.resume(sessionId, {
+  await getAdapter(agent).resume(fullId, {
     tmux: options.tmux,
     tmuxSessionName: options.tmuxName,
     cwd: options.cwd,
@@ -56,7 +57,8 @@ export async function psCommand() {
 }
 
 export async function attachCommand(sessionId: string, options: { agent: string }) {
-  const tmuxName = `agent-${options.agent}-${sessionId.slice(0, 8)}`;
+  const fullId = await resolveSessionId(options.agent as AgentType, sessionId);
+  const tmuxName = `agent-${options.agent}-${fullId.slice(0, 8)}`;
   const proc = Bun.spawn(["tmux", "attach", "-t", tmuxName], {
     stdin: "inherit",
     stdout: "inherit",

@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import type { AgentType, SessionDetail } from "../types.ts";
-import { getAdapter } from "../registry.ts";
+import { getAdapter, resolveSessionId } from "../registry.ts";
 
 export async function showCommand(
   sessionId: string,
@@ -11,8 +11,10 @@ export async function showCommand(
     noThinking?: boolean;
   }
 ) {
-  const adapter = getAdapter(options.agent as AgentType);
-  const detail = await adapter.show(sessionId, {
+  const agent = options.agent as AgentType;
+  const fullId = await resolveSessionId(agent, sessionId);
+  const adapter = getAdapter(agent);
+  const detail = await adapter.show(fullId, {
     format: (options.format as "markdown" | "json" | "raw") || "markdown",
     includeTools: !options.noTools,
     includeThinking: !options.noThinking,

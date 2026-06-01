@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import type { AgentType } from "../types.ts";
-import { getAdapter } from "../registry.ts";
+import { getAdapter, resolveSessionId } from "../registry.ts";
 
 export async function exportCommand(
   sessionId: string,
@@ -11,11 +11,13 @@ export async function exportCommand(
     metaOnly?: boolean;
   }
 ) {
-  const adapter = getAdapter(options.agent as AgentType);
+  const agent = options.agent as AgentType;
+  const fullId = await resolveSessionId(agent, sessionId);
+  const adapter = getAdapter(agent);
 
-  console.log(chalk.dim(`Exporting ${options.agent} session ${sessionId}...`));
+  console.log(chalk.dim(`Exporting ${options.agent} session ${fullId}...`));
 
-  await adapter.exportSession(sessionId, {
+  await adapter.exportSession(fullId, {
     output: options.output,
     includeWorkspace: options.includeWorkspace,
     metaOnly: options.metaOnly,
