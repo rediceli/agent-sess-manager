@@ -29,11 +29,14 @@ export function sha256(content: string | Buffer): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+
 const CJK_RANGE = /[\u{3000}-\u{9fff}\u{ac00}-\u{d7af}\u{ff00}-\u{ffef}\u{4e00}-\u{9fff}\u{3400}-\u{4dbf}\u{2000}-\u{206f}\u{2e80}-\u{2eff}\u{3000}-\u{303f}\u{31c0}-\u{31ef}\u{f900}-\u{faff}\u{fe30}-\u{fe4f}]/u;
 
 export function stringWidth(str: string): number {
+  const stripped = str.replace(ANSI_RE, "");
   let w = 0;
-  for (const ch of str) {
+  for (const ch of stripped) {
     w += CJK_RANGE.test(ch) ? 2 : 1;
   }
   return w;
