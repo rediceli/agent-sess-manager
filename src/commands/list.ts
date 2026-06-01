@@ -7,6 +7,7 @@ const COL_AGENT = 10;
 const COL_ID = 36;
 const COL_TITLE = 30;
 const COL_CWD = 32;
+const INDENT = 2;
 
 export async function listCommand(options: {
   agent?: string;
@@ -76,9 +77,10 @@ async function renderSessionsWithSubagents(agentFilter: AgentType | "all", cwd?:
     displayed++;
 
     const children = childMap.get(root.id) || [];
-    for (const child of children) {
+    for (let i = 0; i < children.length; i++) {
       if (displayed >= maxDisplay) break;
-      printRow(child, true);
+      const isLast = i === children.length - 1;
+      printRow(children[i]!, isLast);
       displayed++;
     }
   }
@@ -92,18 +94,25 @@ function printTableHeader() {
   const id = padEndVisible("ID", COL_ID);
   const title = padEndVisible("TITLE", COL_TITLE);
   const cwd = padEndVisible("CWD", COL_CWD);
-  console.log(chalk.bold(` ${agent} ${id} ${title} ${cwd} UPDATED`));
-  console.log(chalk.dim(" " + "─".repeat(100)));
+  const lead = " ".repeat(INDENT);
+  console.log(chalk.bold(`${lead}${agent} ${id} ${title} ${cwd} UPDATED`));
+  console.log(chalk.dim(" " + "─".repeat(INDENT + COL_AGENT + 1 + COL_ID + 1 + COL_TITLE + 1 + COL_CWD + 1 + 8)));
 }
 
-function printRow(s: SessionMeta, isChild = false) {
-  const prefix = isChild ? chalk.dim(" ├─ ") : " ";
-  const agentLabel = isChild ? "sub" : s.agent;
-  const agent = chalk.cyan(padEndVisible(agentLabel, COL_AGENT));
+function printRow(s: SessionMeta, isLastChild?: boolean) {
+  const isChild = isLastChild !== undefined;
+  const agentRaw = isChild
+    ? (isLastChild ? "`-- sub" : "|-- sub")
+    : s.agent;
+  const agentPadded = padEndVisible(agentRaw, COL_AGENT);
+  const agent = isChild
+    ? chalk.cyan(chalk.dim(agentPadded.slice(0, agentRaw.length)) + agentPadded.slice(agentRaw.length))
+    : chalk.cyan(agentPadded);
   const id = chalk.dim(padEndVisible(s.id.slice(0, 34), COL_ID));
   const title = padEndVisible(truncateVisible(s.title, COL_TITLE), COL_TITLE);
   const cwd = padEndVisible(truncateVisible(s.cwd, COL_CWD), COL_CWD);
   const updated = formatRelativeTime(s.updatedAt);
 
-  console.log(`${prefix}${agent} ${id} ${title} ${cwd} ${chalk.green(updated)}`);
+  const lead = " ".repeat(INDENT);
+  console.log(`${lead}${agent} ${id} ${title} ${cwd} ${chalk.green(updated)}`);
 }
