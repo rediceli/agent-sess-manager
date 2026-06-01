@@ -511,13 +511,14 @@ const git = await getGitInfo(sessionRow.directory);
   }
 
   private deleteSessionRows(db: import("bun:sqlite").Database, sessionId: string): void {
-    const tables = ["part", "message", "session_message", "session_share", "todo", "session"];
-    for (const table of tables) {
+    const childTables = ["part", "message", "session_message", "session_share", "todo"];
+    for (const table of childTables) {
       try {
         db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(sessionId);
       } catch {
         // table may not exist in older schemas
       }
     }
+    db.prepare("DELETE FROM session WHERE id = ?").run(sessionId);
   }
 }
