@@ -1,10 +1,10 @@
 import chalk from "chalk";
 import type { SessionMeta, AgentType } from "../types.ts";
 import { listAllSessions } from "../registry.ts";
-import { formatRelativeTime, truncateVisible, padEndVisible } from "../utils/fs.ts";
+import { formatRelativeTime, truncateVisible, padEndVisible, stringWidth } from "../utils/fs.ts";
 
 const COL_AGENT = 10;
-const COL_ID = 36;
+const COL_ID_MIN = 8;
 const COL_TITLE = 30;
 const COL_CWD = 32;
 const INDENT = 2;
@@ -41,9 +41,10 @@ async function renderRootSessionsOnly(agentFilter: AgentType | "all", cwd?: stri
     return;
   }
 
-  printTableHeader();
+  const idWidth = computeIdWidth(sessions);
+  printTableHeader(idWidth);
   for (const s of sessions) {
-    printRow(s);
+    printRow(s, idWidth);
   }
   console.log(chalk.dim(`\n ${sessions.length} session(s) found.`));
   console.log(chalk.dim(" Use --subagents to show child sessions."));
@@ -69,18 +70,19 @@ async function renderSessionsWithSubagents(agentFilter: AgentType | "all", cwd?:
 
   let displayed = 0;
   const maxDisplay = limit || 50;
+  const idWidth = computeIdWidth(allSessions);
 
-  printTableHeader();
+  printTableHeader(idWidth);
   for (const root of rootSessions) {
     if (displayed >= maxDisplay) break;
-    printRow(root);
+    printRow(root, idWidth);
     displayed++;
 
     const children = childMap.get(root.id) || [];
     for (let i = 0; i < children.length; i++) {
       if (displayed >= maxDisplay) break;
       const isLast = i === children.length - 1;
-      printRow(children[i]!, isLast);
+      printRow(children[i]!, idWidth, isLast);
       displayed++;
     }
   }
@@ -89,17 +91,26 @@ async function renderSessionsWithSubagents(agentFilter: AgentType | "all", cwd?:
   console.log(chalk.dim(`\n ${displayed} session(s) shown (${totalChildren} subagent).`));
 }
 
-function printTableHeader() {
+function computeIdWidth(sessions: SessionMeta[]): number {
+  let w = COL_ID_MIN;
+  for (const s of sessions) {
+    const sw = stringWidth(s.id);
+    if (sw > w) w = sw;
+  }
+  return w;
+}
+
+function printTableHeader(idWidth: number) {
   const agent = padEndVisible("AGENT", COL_AGENT);
-  const id = padEndVisible("ID", COL_ID);
+  const id = padEndVisible("ID", idWidth);
   const title = padEndVisible("TITLE", COL_TITLE);
   const cwd = padEndVisible("CWD", COL_CWD);
   const lead = " ".repeat(INDENT);
   console.log(chalk.bold(`${lead}${agent} ${id} ${title} ${cwd} UPDATED`));
-  console.log(chalk.dim(" " + "─".repeat(INDENT + COL_AGENT + 1 + COL_ID + 1 + COL_TITLE + 1 + COL_CWD + 1 + 8)));
+  console.log(chalk.dim(" " + "─".repeat(INDENT + COL_AGENT + 1 + idWidth + 1 + COL_TITLE + 1 + COL_CWD + 1 + 8)));
 }
 
-function printRow(s: SessionMeta, isLastChild?: boolean) {
+function printRow(s: SessionMeta, idWidth: number, isLastChild?: boolean) {
   const isChild = isLastChild !== undefined;
   const agentRaw = isChild
     ? (isLastChild ? "`-- sub" : "|-- sub")
@@ -108,7 +119,7 @@ function printRow(s: SessionMeta, isLastChild?: boolean) {
   const agent = isChild
     ? chalk.cyan(chalk.dim(agentPadded.slice(0, agentRaw.length)) + agentPadded.slice(agentRaw.length))
     : chalk.cyan(agentPadded);
-  const id = chalk.dim(padEndVisible(s.id.slice(0, 34), COL_ID));
+  const id = chalk.dim(padEndVisible(s.id, idWidth));
   const title = padEndVisible(truncateVisible(s.title, COL_TITLE), COL_TITLE);
   const cwd = padEndVisible(truncateVisible(s.cwd, COL_CWD), COL_CWD);
   const updated = formatRelativeTime(s.updatedAt);
