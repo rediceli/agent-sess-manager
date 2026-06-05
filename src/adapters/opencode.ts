@@ -19,7 +19,7 @@ import type {
 } from "../types.ts";
 import { openSqliteReadOnly, openSqliteReadWrite, runInsert, queryAll, queryOne, getAgentDbPath, getAgentDataRoot } from "../utils/db.ts";
 import type { SQLQueryBindings } from "bun:sqlite";
-import { dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256, ensureDir } from "../utils/fs.ts";
+import { dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256, ensureDir, makeForkId } from "../utils/fs.ts";
 import { join, basename, dirname, relative } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 
@@ -87,6 +87,22 @@ export class OpenCodeAdapter implements SessionAdapter {
 
   getDataRoot(): string {
     return getAgentDataRoot(AGENT);
+  }
+
+  async findIdsByPrefix(prefix: string, limit = 10): Promise<string[]> {
+    if (!(await this.isAvailableAsync())) return [];
+    const db = openSqliteReadOnly(getAgentDbPath(AGENT));
+    try {
+      const escaped = prefix.replace(/[\\%_]/g, (c) => `\\${c}`);
+      const rows = queryAll<{ id: string }>(
+        db,
+        "SELECT id FROM session WHERE id LIKE ? ESCAPE '\\' ORDER BY time_updated DESC LIMIT ?",
+        [`${escaped}%`, limit]
+      );
+      return rows.map((r) => r.id);
+    } finally {
+      db.close();
+    }
   }
 
   async list(options?: ListOptions): Promise<SessionMeta[]> {
@@ -241,13 +257,24 @@ export class OpenCodeAdapter implements SessionAdapter {
       for (const session of sessions) {
         if (options.limit && results.length >= options.limit) break;
 
-        const parts = queryAll<OpenCodePartRow>(
+        const rows = queryAll<OpenCodePartRow & { msg_data: string }>(
           db,
-          "SELECT * FROM part WHERE session_id = ? AND data LIKE ?",
+          `SELECT part.*, message.data AS msg_data
+             FROM part
+             LEFT JOIN message ON message.id = part.message_id
+            WHERE part.session_id = ? AND part.data LIKE ?`,
           [session.id, `%${options.query}%`]
         );
 
-        for (const part of parts) {
+        const messageOrder = new Map<string, number>();
+        const ordered = queryAll<{ id: string }>(
+          db,
+          "SELECT id FROM message WHERE session_id = ? ORDER BY time_created",
+          [session.id]
+        );
+        ordered.forEach((m, i) => messageOrder.set(m.id, i));
+
+        for (const part of rows) {
           try {
             const partData = JSON.parse(part.data) as Record<string, unknown>;
             const text = (partData.text as string) || "";
@@ -258,11 +285,18 @@ export class OpenCodeAdapter implements SessionAdapter {
                 : text.toLowerCase().includes(options.query.toLowerCase());
 
             if (matches) {
+              let role: SessionMessage["role"] = "tool";
+              try {
+                const msgData = JSON.parse(part.msg_data || "{}") as Record<string, unknown>;
+                const r = msgData.role as string | undefined;
+                if (r === "user" || r === "assistant" || r === "system" || r === "tool") role = r;
+              } catch { /* keep default */ }
+
               results.push({
                 sessionId: session.id,
                 agent: AGENT,
-                messageIndex: 0,
-                role: "tool",
+                messageIndex: messageOrder.get(part.message_id) ?? 0,
+                role,
                 content: text.slice(0, 200),
                 timestamp: msToIso(part.time_created),
               });
@@ -395,7 +429,7 @@ const git = await getGitInfo(sessionRow.directory);
 
     let importSessionId = sessionId;
     if (existing && options.onConflict === "fork") {
-      importSessionId = `ses_imported_${Date.now()}_${sessionId.slice(0, 8)}`;
+      importSessionId = makeForkId(AGENT, sessionId);
     }
 
     const db = openSqliteReadWrite(dbPath);
@@ -449,17 +483,17 @@ const git = await getGitInfo(sessionRow.directory);
       if (!sessionRow) throw new Error(`Session not found: ${sessionId}`);
 
       const cwd = options.cwd || sessionRow.directory;
-      const resumeCmd = options.fork
-        ? `opencode --fork -s ${sessionId}`
-        : `opencode -s ${sessionId}`;
+      const resumeArgs = options.fork
+        ? ["opencode", "--fork", "-s", sessionId]
+        : ["opencode", "-s", sessionId];
 
       if (options.tmux) {
         const sessionName = options.tmuxSessionName || `agent-${AGENT}-${sessionId.slice(0, 8)}`;
-        const tmuxCmd = `tmux new-session -d -s "${sessionName}" -c "${cwd}"`;
-        Bun.spawnSync(["bash", "-c", tmuxCmd]);
-        Bun.spawnSync(["bash", "-c", `tmux send-keys -t "${sessionName}" "${resumeCmd}" Enter`]);
+        Bun.spawnSync(["tmux", "new-session", "-d", "-s", sessionName, "-c", cwd]);
+        Bun.spawnSync(["tmux", "send-keys", "-t", sessionName, resumeArgs.join(" "), "Enter"]);
       } else {
-        const proc = Bun.spawn(["bash", "-c", `cd "${cwd}" && ${resumeCmd}`], {
+        const proc = Bun.spawn(resumeArgs, {
+          cwd,
           stdin: "inherit",
           stdout: "inherit",
           stderr: "inherit",
@@ -482,24 +516,31 @@ const git = await getGitInfo(sessionRow.directory);
         return { deleted: false, sessionId, agent: AGENT, warnings: ["Session not found"] };
       }
 
-      const childSessions = queryAll<{ id: string }>(db, "SELECT id FROM session WHERE parent_id = ?", [sessionId]);
+      const directChildren = queryAll<{ id: string }>(db, "SELECT id FROM session WHERE parent_id = ?", [sessionId]);
 
-      if (childSessions.length > 0 && !options?.cascade) {
+      if (directChildren.length > 0 && !options?.cascade) {
         return {
           deleted: false,
           sessionId,
           agent: AGENT,
-          warnings: [`Session has ${childSessions.length} child session(s). Use --cascade to delete them too.`],
+          warnings: [`Session has ${directChildren.length} child session(s). Use --cascade to delete them too.`],
         };
       }
 
       if (options?.cascade) {
-        for (const child of childSessions) {
-          this.deleteSessionRows(db, child.id);
+        const visited = new Set<string>([sessionId]);
+        const queue = directChildren.map((c) => c.id);
+        while (queue.length > 0) {
+          const childId = queue.shift()!;
+          if (visited.has(childId)) continue;
+          visited.add(childId);
+
+          const grand = queryAll<{ id: string }>(db, "SELECT id FROM session WHERE parent_id = ?", [childId]);
+          for (const g of grand) if (!visited.has(g.id)) queue.push(g.id);
+
+          this.deleteSessionRows(db, childId);
           childrenDeleted++;
         }
-      } else if (childSessions.length > 0) {
-        warnings.push(`Orphaned ${childSessions.length} child session(s) — their parent_id now points to a deleted session.`);
       }
 
       this.deleteSessionRows(db, sessionId);

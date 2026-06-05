@@ -17,7 +17,7 @@ import type {
   DeleteOptions,
   DeleteResult,
 } from "../types.ts";
-import { getAgentDataRoot, dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256, ensureDir } from "../utils/index.ts";
+import { getAgentDataRoot, dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256, ensureDir, makeForkId } from "../utils/index.ts";
 import { join, basename, dirname, relative } from "node:path";
 import { readFile, writeFile, readdir, stat, copyFile, mkdir, rm } from "node:fs/promises";
 import { glob } from "glob";
@@ -56,6 +56,22 @@ function pathToProjectDir(path: string): string {
   return path.replace(/\//g, "-").replace(/^\/?/, "-");
 }
 
+function rewriteClaudeSessionId(content: string, oldId: string, newId: string): string {
+  const lines = content.split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    if (!line) { out.push(line); continue; }
+    try {
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      if (entry.sessionId === oldId) entry.sessionId = newId;
+      out.push(JSON.stringify(entry));
+    } catch {
+      out.push(line);
+    }
+  }
+  return out.join("\n");
+}
+
 function extractTextContent(content: string | ContentBlock[]): string {
   if (typeof content === "string") return content;
   return content
@@ -77,6 +93,34 @@ export class ClaudeAdapter implements SessionAdapter {
 
   getDataRoot(): string {
     return getAgentDataRoot(AGENT);
+  }
+
+  async findIdsByPrefix(prefix: string, limit = 10): Promise<string[]> {
+    if (!(await this.isAvailableAsync())) return [];
+    const projectsDir = join(getAgentDataRoot(AGENT), "projects");
+    if (!(await dirExists(projectsDir))) return [];
+
+    const matches: string[] = [];
+    const projectDirs = await readdir(projectsDir);
+    for (const projectDir of projectDirs) {
+      if (matches.length >= limit) break;
+      const projectPath = join(projectsDir, projectDir);
+      try {
+        const projectStat = await stat(projectPath);
+        if (!projectStat.isDirectory()) continue;
+      } catch { continue; }
+
+      const files = await readdir(projectPath).catch(() => [] as string[]);
+      for (const f of files) {
+        if (!f.endsWith(".jsonl")) continue;
+        const id = f.slice(0, -".jsonl".length);
+        if (id.startsWith(prefix)) {
+          matches.push(id);
+          if (matches.length >= limit) break;
+        }
+      }
+    }
+    return matches;
   }
 
   async list(options?: ListOptions): Promise<SessionMeta[]> {
@@ -448,7 +492,7 @@ export class ClaudeAdapter implements SessionAdapter {
         return { success: false, sessionId, conflicts: [{ type: "session_exists", severity: "warning", detail: `Session file already exists at ${existingPath}` }], warnings };
       }
       if (options.onConflict === "fork") {
-        importSessionId = `${sessionId}_imported_${Date.now()}`;
+        importSessionId = makeForkId(AGENT, sessionId);
         warnings.push("Fork mode: imported session will get a new ID.");
       }
     }
@@ -463,9 +507,9 @@ export class ClaudeAdapter implements SessionAdapter {
     const targetJsonlPath = join(targetProjectPath, `${importSessionId}.jsonl`);
 
     if (importSessionId !== sessionId) {
-      let content = await readFile(sourceJsonl, "utf-8");
-      content = content.replaceAll(sessionId, importSessionId);
-      await writeFile(targetJsonlPath, content);
+      const content = await readFile(sourceJsonl, "utf-8");
+      const rewritten = rewriteClaudeSessionId(content, sessionId, importSessionId);
+      await writeFile(targetJsonlPath, rewritten);
     } else {
       await copyFile(sourceJsonl, targetJsonlPath);
     }
@@ -504,22 +548,23 @@ export class ClaudeAdapter implements SessionAdapter {
     const projectDir = basename(dirname(jsonlFile));
     const cwd = options.cwd || projectDirToPath(projectDir);
 
-    const resumeCmd = options.fork
-      ? `claude --fork-session ${sessionId}`
-      : `claude --resume ${sessionId}`;
+    const resumeArgs = options.fork
+      ? ["claude", "--fork-session", sessionId]
+      : ["claude", "--resume", sessionId];
 
-      if (options.tmux) {
-        const sessionName = options.tmuxSessionName || `agent-${AGENT}-${sessionId.slice(0, 8)}`;
-        Bun.spawnSync(["bash", "-c", `tmux new-session -d -s "${sessionName}" -c "${cwd}"`]);
-        Bun.spawnSync(["bash", "-c", `tmux send-keys -t "${sessionName}" "cd '${cwd}' && ${resumeCmd}" Enter`]);
-      } else {
-        const proc = Bun.spawn(["bash", "-c", `cd "${cwd}" && ${resumeCmd}`], {
-          stdin: "inherit",
-          stdout: "inherit",
-          stderr: "inherit",
-        });
-        await proc.exited;
-      }
+    if (options.tmux) {
+      const sessionName = options.tmuxSessionName || `agent-${AGENT}-${sessionId.slice(0, 8)}`;
+      Bun.spawnSync(["tmux", "new-session", "-d", "-s", sessionName, "-c", cwd]);
+      Bun.spawnSync(["tmux", "send-keys", "-t", sessionName, resumeArgs.join(" "), "Enter"]);
+    } else {
+      const proc = Bun.spawn(resumeArgs, {
+        cwd,
+        stdin: "inherit",
+        stdout: "inherit",
+        stderr: "inherit",
+      });
+      await proc.exited;
+    }
   }
 
   async deleteSession(sessionId: string, options?: DeleteOptions): Promise<DeleteResult> {

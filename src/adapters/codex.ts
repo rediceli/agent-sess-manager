@@ -19,7 +19,7 @@ import type {
 } from "../types.ts";
 import { openSqliteReadOnly, openSqliteReadWrite, runInsert, queryAll, queryOne, getAgentDbPath, getAgentDataRoot } from "../utils/db.ts";
 import type { Database } from "bun:sqlite";
-import { dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256, ensureDir } from "../utils/fs.ts";
+import { dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256, ensureDir, makeForkId } from "../utils/fs.ts";
 import { join, basename, dirname, relative } from "node:path";
 import { readFile, writeFile, readdir, stat, copyFile, mkdir, rm } from "node:fs/promises";
 import type { SQLQueryBindings } from "bun:sqlite";
@@ -67,6 +67,24 @@ function msToIso(ms: number | null): string {
   return new Date(ms * 1000).toISOString();
 }
 
+function rewriteCodexSessionId(content: string, oldId: string, newId: string): string {
+  const lines = content.split("\n");
+  const out: string[] = [];
+  for (const line of lines) {
+    if (!line) { out.push(line); continue; }
+    try {
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      const payload = entry.payload as Record<string, unknown> | undefined;
+      if (payload && payload.id === oldId) payload.id = newId;
+      if ((entry as Record<string, unknown>).id === oldId) (entry as Record<string, unknown>).id = newId;
+      out.push(JSON.stringify(entry));
+    } catch {
+      out.push(line);
+    }
+  }
+  return out.join("\n");
+}
+
 function buildParentMap(db: Database): Map<string, string> {
   const map = new Map<string, string>();
   try {
@@ -95,6 +113,22 @@ export class CodexAdapter implements SessionAdapter {
 
   getDataRoot(): string {
     return getAgentDataRoot(AGENT);
+  }
+
+  async findIdsByPrefix(prefix: string, limit = 10): Promise<string[]> {
+    if (!(await this.isAvailableAsync())) return [];
+    const db = openSqliteReadOnly(getAgentDbPath(AGENT));
+    try {
+      const escaped = prefix.replace(/[\\%_]/g, (c) => `\\${c}`);
+      const rows = queryAll<{ id: string }>(
+        db,
+        "SELECT id FROM threads WHERE archived = 0 AND id LIKE ? ESCAPE '\\' ORDER BY updated_at_ms DESC LIMIT ?",
+        [`${escaped}%`, limit]
+      );
+      return rows.map((r) => r.id);
+    } finally {
+      db.close();
+    }
   }
 
   async list(options?: ListOptions): Promise<SessionMeta[]> {
@@ -389,7 +423,7 @@ export class CodexAdapter implements SessionAdapter {
         return { success: false, sessionId, conflicts: [{ type: "session_exists", severity: "warning", detail: `Thread ${sessionId} already exists. Use --on-conflict overwrite|fork to proceed.` }], warnings };
       }
       if (options.onConflict === "fork") {
-        importSessionId = `019e_imported_${Date.now()}_${sessionId.slice(0, 8)}`;
+        importSessionId = makeForkId(AGENT, sessionId);
         warnings.push("Fork mode: imported session will get a new ID.");
       }
     }
@@ -411,9 +445,9 @@ export class CodexAdapter implements SessionAdapter {
 
       if (!options.dryRun) {
         if (importSessionId !== sessionId) {
-          let content = await readFile(rolloutSourcePath, "utf-8");
-          content = content.replaceAll(sessionId, importSessionId);
-          await writeFile(newRolloutPath, content);
+          const content = await readFile(rolloutSourcePath, "utf-8");
+          const rewritten = rewriteCodexSessionId(content, sessionId, importSessionId);
+          await writeFile(newRolloutPath, rewritten);
         } else {
           await copyFile(rolloutSourcePath, newRolloutPath);
         }
@@ -455,25 +489,26 @@ export class CodexAdapter implements SessionAdapter {
       if (!threadRow) throw new Error(`Session not found: ${sessionId}`);
 
       const cwd = options.cwd || threadRow.cwd;
-      const resumeCmd = options.fork
-        ? `codex fork ${sessionId}`
-        : `codex resume ${sessionId}`;
+      const resumeArgs = options.fork
+        ? ["codex", "fork", sessionId]
+        : ["codex", "resume", sessionId];
 
       if (options.tmux) {
         const sessionName = options.tmuxSessionName || `agent-${AGENT}-${sessionId.slice(0, 8)}`;
-        Bun.spawnSync(["bash", "-c", `tmux new-session -d -s "${sessionName}" -c "${cwd}"`]);
-        Bun.spawnSync(["bash", "-c", `tmux send-keys -t "${sessionName}" "${resumeCmd}" Enter`]);
+        Bun.spawnSync(["tmux", "new-session", "-d", "-s", sessionName, "-c", cwd]);
+        Bun.spawnSync(["tmux", "send-keys", "-t", sessionName, resumeArgs.join(" "), "Enter"]);
       } else {
-        const proc = Bun.spawn(["bash", "-c", `cd "${cwd}" && ${resumeCmd}`], {
+        const proc = Bun.spawn(resumeArgs, {
+          cwd,
           stdin: "inherit",
           stdout: "inherit",
           stderr: "inherit",
         });
-    await proc.exited;
-  }
-  } finally {
-    db.close();
-  }
+        await proc.exited;
+      }
+    } finally {
+      db.close();
+    }
   }
 
   async deleteSession(sessionId: string, options?: DeleteOptions): Promise<DeleteResult> {
@@ -487,23 +522,39 @@ export class CodexAdapter implements SessionAdapter {
         return { deleted: false, sessionId, agent: AGENT, warnings: ["Session not found"] };
       }
 
-      const childEdges = queryAll<{ child_thread_id: string }>(
-        db, "SELECT child_thread_id FROM thread_spawn_edges WHERE parent_thread_id = ?", [sessionId]
-      );
+      let directChildren: { child_thread_id: string }[] = [];
+      try {
+        directChildren = queryAll<{ child_thread_id: string }>(
+          db, "SELECT child_thread_id FROM thread_spawn_edges WHERE parent_thread_id = ?", [sessionId]
+        );
+      } catch { /* table may not exist on older schemas */ }
 
-      if (childEdges.length > 0 && !options?.cascade) {
+      if (directChildren.length > 0 && !options?.cascade) {
         return {
           deleted: false,
           sessionId,
           agent: AGENT,
-          warnings: [`Session has ${childEdges.length} child thread(s). Use --cascade to delete them too.`],
+          warnings: [`Session has ${directChildren.length} child thread(s). Use --cascade to delete them too.`],
         };
       }
 
       if (options?.cascade) {
-        for (const edge of childEdges) {
-          const childResult = await this.deleteThreadOnly(db, edge.child_thread_id);
-          if (childResult) childrenDeleted++;
+        const visited = new Set<string>([sessionId]);
+        const queue = directChildren.map((e) => e.child_thread_id);
+        while (queue.length > 0) {
+          const childId = queue.shift()!;
+          if (visited.has(childId)) continue;
+          visited.add(childId);
+
+          try {
+            const grand = queryAll<{ child_thread_id: string }>(
+              db, "SELECT child_thread_id FROM thread_spawn_edges WHERE parent_thread_id = ?", [childId]
+            );
+            for (const g of grand) if (!visited.has(g.child_thread_id)) queue.push(g.child_thread_id);
+          } catch { /* older schema */ }
+
+          const ok = await this.deleteThreadOnly(db, childId);
+          if (ok) childrenDeleted++;
         }
       }
 

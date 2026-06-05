@@ -114,6 +114,8 @@ export interface SessionAdapter {
   importSession(options: ImportOptions): Promise<ImportResult>;
   resume(sessionId: string, options: ResumeOptions): Promise<void>;
   deleteSession(sessionId: string, options?: DeleteOptions): Promise<DeleteResult>;
+  /** Optional: efficient prefix-ID lookup. Defaults to list-scan via the registry. */
+  findIdsByPrefix?(prefix: string, limit?: number): Promise<string[]>;
 }
 
 export interface ImportResult {

@@ -42,7 +42,7 @@ export function queryOne<T = Record<string, unknown>>(
 }
 
 export function getAgentDbPath(agent: AgentType): string {
-  const home = process.env.HOME || "/";
+  const home = requireHome();
   switch (agent) {
     case "opencode":
       return `${home}/.local/share/opencode/opencode.db`;
@@ -54,7 +54,7 @@ export function getAgentDbPath(agent: AgentType): string {
 }
 
 export function getAgentDataRoot(agent: AgentType): string {
-  const home = process.env.HOME || "/";
+  const home = requireHome();
   switch (agent) {
     case "opencode":
       return `${home}/.local/share/opencode`;
@@ -63,4 +63,12 @@ export function getAgentDataRoot(agent: AgentType): string {
     case "codex":
       return `${home}/.codex`;
   }
+}
+
+function requireHome(): string {
+  const home = process.env.HOME;
+  if (!home) {
+    throw new Error("HOME environment variable is not set; cannot locate agent data directory.");
+  }
+  return home;
 }

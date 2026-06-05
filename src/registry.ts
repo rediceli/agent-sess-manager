@@ -38,9 +38,22 @@ export async function listAllSessions(filter?: AgentType | "all", cwd?: string, 
 
 export async function resolveSessionId(agent: AgentType, partialId: string): Promise<string> {
   const adapter = getAdapter(agent);
+
+  if (adapter.findIdsByPrefix) {
+    const matches = await adapter.findIdsByPrefix(partialId, 10);
+    if (matches.length === 0) throw new Error(`No session found matching prefix: ${partialId}`);
+    if (matches.length === 1) return matches[0]!;
+    const head = matches.slice(0, 5).map((id) => `  ${id}`).join("\n");
+    const more = matches.length > 5 ? `\n  ... and ${matches.length - 5} more` : "";
+    throw new Error(`Ambiguous prefix "${partialId}" matches ${matches.length} sessions:\n${head}${more}`);
+  }
+
+  // Fallback for adapters without prefix support
   const sessions = await adapter.list({ limit: 9999 });
   const matches = sessions.filter((s) => s.id.startsWith(partialId));
   if (matches.length === 0) throw new Error(`No session found matching prefix: ${partialId}`);
   if (matches.length === 1) return matches[0]!.id;
-  throw new Error(`Ambiguous prefix "${partialId}" matches ${matches.length} sessions:\n${matches.map((s: SessionMeta) => `  ${s.id} — ${s.title}`).join("\n")}`);
+  const head = matches.slice(0, 5).map((s: SessionMeta) => `  ${s.id} — ${s.title}`).join("\n");
+  const more = matches.length > 5 ? `\n  ... and ${matches.length - 5} more` : "";
+  throw new Error(`Ambiguous prefix "${partialId}" matches ${matches.length} sessions:\n${head}${more}`);
 }

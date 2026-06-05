@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile, stat, readdir } from "node:fs/promises";
 import { join, dirname, basename, resolve } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { ExportManifest, AgentType } from "../types.ts";
 
 export async function ensureDir(path: string) {
@@ -27,6 +27,13 @@ export async function dirExists(path: string): Promise<boolean> {
 
 export function sha256(content: string | Buffer): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+export function makeForkId(agent: AgentType, originalId: string): string {
+  const ts = Date.now();
+  const rand = randomBytes(4).toString("hex");
+  const slice = originalId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 8) || "src";
+  return `${agent}_imported_${ts}_${rand}_${slice}`;
 }
 
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
@@ -85,7 +92,9 @@ export function formatRelativeTime(isoDate: string): string {
 
 export function expandHome(path: string): string {
   if (path.startsWith("~")) {
-    return join(process.env.HOME || "/", path.slice(1));
+    const home = process.env.HOME;
+    if (!home) throw new Error("HOME environment variable is not set; cannot expand ~ in path.");
+    return join(home, path.slice(1));
   }
   return path;
 }

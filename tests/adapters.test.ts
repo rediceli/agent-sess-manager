@@ -33,6 +33,8 @@ function createOpenCodeTestDb(dbPath: string): Database {
 
   db.run("INSERT INTO project VALUES ('proj1', '/test/project', 'git', 'test-project', NULL, NULL, 1000, 1000, NULL, '[]', NULL, NULL)");
   db.run("INSERT INTO session VALUES ('ses_test1', 'proj1', NULL, 'test-slug', '/test/project', 'Test Session', '1.0', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1000, 2000, NULL, NULL, NULL, NULL, NULL, '{\"id\":\"test-model\"}', 0.5, 100, 200, 50, 10, 5)");
+  db.run("INSERT INTO session VALUES ('ses_child1', 'proj1', 'ses_test1', 'child1', '/test/project', 'Child 1', '1.0', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1100, 1200, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 0, 0, 0)");
+  db.run("INSERT INTO session VALUES ('ses_grand1', 'proj1', 'ses_child1', 'grand1', '/test/project', 'Grandchild', '1.0', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1110, 1120, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 0, 0, 0)");
   db.run("INSERT INTO message VALUES ('msg1', 'ses_test1', 1500, 1500, '{\"role\":\"user\"}')");
   db.run("INSERT INTO message VALUES ('msg2', 'ses_test1', 1600, 1600, '{\"role\":\"assistant\",\"modelID\":\"test-model\"}')");
   db.run("INSERT INTO part VALUES ('part1', 'msg1', 'ses_test1', 1500, 1500, '{\"type\":\"text\",\"text\":\"Hello from test\"}')");
@@ -229,5 +231,135 @@ describe("Codex Adapter", () => {
 
     expect(result.success).toBe(true);
     expect(result.warnings.some((w) => w.includes("/original/path") && w.includes("/new/path"))).toBe(true);
+  });
+});
+
+describe("Fixes — regression tests", () => {
+  test("OpenCode search reports the real role from message.data, not hardcoded 'tool'", async () => {
+    const adapter = new OpenCodeAdapter();
+    const results = await adapter.search({ query: "Hello from test" });
+    expect(results.length).toBeGreaterThanOrEqual(1);
+    const hit = results.find((r) => r.content.includes("Hello from test"))!;
+    expect(hit.role).toBe("user");
+    const asstResults = await adapter.search({ query: "Hi there" });
+    const asstHit = asstResults.find((r) => r.content.includes("Hi there"))!;
+    expect(asstHit.role).toBe("assistant");
+  });
+
+  test("OpenCode --cascade recurses to grandchildren", async () => {
+    const adapter = new OpenCodeAdapter();
+    const result = await adapter.deleteSession("ses_test1", { cascade: true });
+    expect(result.deleted).toBe(true);
+    expect(result.childrenDeleted).toBe(2);
+
+    const remaining = await adapter.list({ limit: 50 });
+    expect(remaining.find((s) => s.id === "ses_test1")).toBeUndefined();
+    expect(remaining.find((s) => s.id === "ses_child1")).toBeUndefined();
+    expect(remaining.find((s) => s.id === "ses_grand1")).toBeUndefined();
+  });
+
+  test("OpenCode findIdsByPrefix returns matching IDs without scanning the world", async () => {
+    // Re-create the test row that the cascade test deleted, so this test is order-independent
+    const dbPath = join(TMP, ".local", "share", "opencode", "opencode.db");
+    const db = new Database(dbPath);
+    db.run("INSERT OR IGNORE INTO session VALUES ('ses_prefix_a', 'proj1', NULL, 'a', '/test/project', 'A', '1.0', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 100, 100, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 0, 0, 0)");
+    db.run("INSERT OR IGNORE INTO session VALUES ('ses_prefix_b', 'proj1', NULL, 'b', '/test/project', 'B', '1.0', NULL, NULL, NULL, NULL, NULL, NULL, NULL, 200, 200, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 0, 0, 0, 0)");
+    db.close();
+
+    const adapter = new OpenCodeAdapter();
+    const matches = await adapter.findIdsByPrefix("ses_prefix_", 10);
+    expect(matches).toContain("ses_prefix_a");
+    expect(matches).toContain("ses_prefix_b");
+
+    const single = await adapter.findIdsByPrefix("ses_prefix_a", 10);
+    expect(single).toEqual(["ses_prefix_a"]);
+  });
+
+  test("Claude findIdsByPrefix scans filenames in projects dir", async () => {
+    const adapter = new ClaudeAdapter();
+    const matches = await adapter.findIdsByPrefix("claude_test", 10);
+    expect(matches).toContain("claude_test1");
+  });
+
+  test("makeForkId produces unique, prefixed IDs", async () => {
+    const { makeForkId } = await import("../src/utils/fs.ts");
+    const a = makeForkId("opencode", "ses_original_xyz");
+    const b = makeForkId("opencode", "ses_original_xyz");
+    expect(a).not.toBe(b); // randomBytes ensures uniqueness even within same ms
+    expect(a.startsWith("opencode_imported_")).toBe(true);
+    expect(a).toContain("ses_orig"); // 8-char slice of original
+  });
+
+  test("Claude fork-mode rewrite preserves user content containing the old session ID", async () => {
+    const adapter = new ClaudeAdapter();
+
+    // pathToProjectDir applies replace(/^\/?/, "-") AFTER replacing all "/", so
+    // "/tmp/collision" → "-tmp-collision" → "--tmp-collision" (double leading dash).
+    // We must create the existing-target file at that exact encoded path.
+    const oldId = "claude_collision_test";
+    const originalCwd = "/tmp/collision";
+    const encodedDir = "--tmp-collision";
+    const targetProjectDir = join(TMP, ".claude", "projects", encodedDir);
+    await mkdir(targetProjectDir, { recursive: true });
+
+    const messageContainingId = `Please don't corrupt this id: ${oldId} keep it intact`;
+    const lines = [
+      JSON.stringify({ type: "user", sessionId: oldId, message: { role: "user", content: messageContainingId }, timestamp: new Date().toISOString(), cwd: originalCwd }),
+      JSON.stringify({ type: "assistant", sessionId: oldId, message: { role: "assistant", content: [{ type: "text", text: "ok" }] }, timestamp: new Date().toISOString() }),
+    ];
+
+    // Pre-create the existing target file so import takes the fork branch
+    const targetExisting = join(targetProjectDir, `${oldId}.jsonl`);
+    await writeFile(targetExisting, lines.join("\n"));
+    expect(existsSync(targetExisting)).toBe(true);
+
+    // Build a minimal manifest + bundle
+    const bundleDir = join(TMP, "claude-fork-bundle");
+    await mkdir(join(bundleDir, "session-data"), { recursive: true });
+    const bundledJsonl = join(bundleDir, "session-data", `${oldId}.jsonl`);
+    await writeFile(bundledJsonl, lines.join("\n"));
+    const { sha256 } = await import("../src/utils/fs.ts");
+    const checksum = sha256(await readFile(bundledJsonl));
+    await writeFile(join(bundleDir, "manifest.json"), JSON.stringify({
+      toolVersion: "0.1.0",
+      agent: "claude",
+      sessionId: oldId,
+      originalCwd: "/tmp/collision",
+      exportedAt: new Date().toISOString(),
+      files: [`session-data/${oldId}.jsonl`],
+      checksums: { [`session-data/${oldId}.jsonl`]: checksum },
+    }));
+
+    const result = await adapter.importSession({
+      bundlePath: bundleDir,
+      onConflict: "fork",
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.sessionId).not.toBe(oldId);
+
+    const writtenPath = join(targetProjectDir, `${result.sessionId}.jsonl`);
+    expect(existsSync(writtenPath)).toBe(true);
+    const written = await readFile(writtenPath, "utf-8");
+
+    // Structural sessionId field MUST be rewritten
+    const firstEntry = JSON.parse(written.split("\n")[0]!);
+    expect(firstEntry.sessionId).toBe(result.sessionId);
+    // User message body MUST still contain the original ID literally
+    expect(firstEntry.message.content).toContain(oldId);
+  });
+
+  test("getAgentDbPath/expandHome throw clearly when HOME is unset", async () => {
+    const savedHome = process.env.HOME;
+    delete process.env.HOME;
+    try {
+      const { getAgentDbPath, getAgentDataRoot } = await import("../src/utils/db.ts");
+      const { expandHome } = await import("../src/utils/fs.ts");
+      expect(() => getAgentDbPath("opencode")).toThrow(/HOME/);
+      expect(() => getAgentDataRoot("claude")).toThrow(/HOME/);
+      expect(() => expandHome("~/foo")).toThrow(/HOME/);
+    } finally {
+      process.env.HOME = savedHome;
+    }
   });
 });
