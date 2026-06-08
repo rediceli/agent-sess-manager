@@ -77,12 +77,26 @@ if [ -w "$BIN_DIR" ]; then
   ln -sf "$INSTALL_DIR/bin/agent-session" "$BIN_DIR/agent-session"
   ok "Linked agent-session -> $BIN_DIR/agent-session"
 else
-  warn "$BIN_DIR is not writable. Add to PATH manually:"
-  echo ""
-  echo "  export PATH=\"$INSTALL_DIR/bin:\$PATH\""
-  echo ""
-  mkdir -p "$INSTALL_DIR/bin"
-  ok "Wrapper script created at $INSTALL_DIR/bin/agent-session"
+  USER_BIN_DIR="$HOME/.local/bin"
+  mkdir -p "$USER_BIN_DIR"
+  if ln -sf "$INSTALL_DIR/bin/agent-session" "$USER_BIN_DIR/agent-session"; then
+    ok "Linked agent-session -> $USER_BIN_DIR/agent-session"
+    case ":$PATH:" in
+      *":$USER_BIN_DIR:"*) ;;
+      *)
+        warn "$USER_BIN_DIR is not on your PATH. Add this line to your shell rc:"
+        echo ""
+        echo "  export PATH=\"$USER_BIN_DIR:\$PATH\""
+        echo ""
+        ;;
+    esac
+  else
+    warn "Could not write to $BIN_DIR or $USER_BIN_DIR. Add to PATH manually:"
+    echo ""
+    echo "  export PATH=\"$INSTALL_DIR/bin:\$PATH\""
+    echo ""
+    ok "Wrapper script available at $INSTALL_DIR/bin/agent-session"
+  fi
 fi
 
 if command -v agent-session >/dev/null 2>&1; then
