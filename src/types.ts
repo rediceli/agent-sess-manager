@@ -78,6 +78,7 @@ export interface ResumeOptions {
   tmuxSessionName?: string;
   cwd?: string;
   fork?: boolean;
+  agentArgs?: string[];
 }
 
 export interface SearchOptions {

@@ -127,7 +127,10 @@ agent-session delete 019e623c-c61b -a codex   # Matches full UUID automatically
 agent-session resume <sessionId> -a opencode
 agent-session resume <sessionId> -a claude --tmux
 agent-session resume <sessionId> -a codex --fork
+agent-session resume <sessionId> -a claude -- --dangerously-skip-permissions
 ```
+
+Use `--` to separate `agent-session` options from extra arguments you want to pass directly to the native agent CLI.
 
 ### Process Management
 

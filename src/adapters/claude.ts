@@ -17,7 +17,7 @@ import type {
   DeleteOptions,
   DeleteResult,
 } from "../types.ts";
-import { getAgentDataRoot, dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256, ensureDir, makeForkId } from "../utils/index.ts";
+import { getAgentDataRoot, dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256, ensureDir, makeForkId, formatShellCommand } from "../utils/index.ts";
 import { join, basename, dirname, relative } from "node:path";
 import { readFile, writeFile, readdir, stat, copyFile, mkdir, rm } from "node:fs/promises";
 import { glob } from "glob";
@@ -548,14 +548,17 @@ export class ClaudeAdapter implements SessionAdapter {
     const projectDir = basename(dirname(jsonlFile));
     const cwd = options.cwd || projectDirToPath(projectDir);
 
-    const resumeArgs = options.fork
-      ? ["claude", "--fork-session", sessionId]
-      : ["claude", "--resume", sessionId];
+    const resumeArgs = [
+      ...(options.fork
+        ? ["claude", "--fork-session", sessionId]
+        : ["claude", "--resume", sessionId]),
+      ...(options.agentArgs ?? []),
+    ];
 
     if (options.tmux) {
       const sessionName = options.tmuxSessionName || `agent-${AGENT}-${sessionId.slice(0, 8)}`;
       Bun.spawnSync(["tmux", "new-session", "-d", "-s", sessionName, "-c", cwd]);
-      Bun.spawnSync(["tmux", "send-keys", "-t", sessionName, resumeArgs.join(" "), "Enter"]);
+      Bun.spawnSync(["tmux", "send-keys", "-t", sessionName, formatShellCommand(resumeArgs), "Enter"]);
     } else {
       const proc = Bun.spawn(resumeArgs, {
         cwd,

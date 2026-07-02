@@ -4,6 +4,7 @@ import { getAdapter, resolveSessionId } from "../registry.ts";
 
 export async function resumeCommand(
   sessionId: string,
+  agentArgs: string[] = [],
   options: {
     agent: string;
     tmux?: boolean;
@@ -22,6 +23,7 @@ export async function resumeCommand(
     tmuxSessionName: options.tmuxName,
     cwd: options.cwd,
     fork: options.fork,
+    agentArgs,
   });
 }
 

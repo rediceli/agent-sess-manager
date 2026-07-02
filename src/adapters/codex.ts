@@ -20,6 +20,7 @@ import type {
 import { openSqliteReadOnly, openSqliteReadWrite, runInsert, queryAll, queryOne, getAgentDbPath, getAgentDataRoot } from "../utils/db.ts";
 import type { Database } from "bun:sqlite";
 import { dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256, ensureDir, makeForkId } from "../utils/fs.ts";
+import { formatShellCommand } from "../utils/shell.ts";
 import { join, basename, dirname, relative } from "node:path";
 import { readFile, writeFile, readdir, stat, copyFile, mkdir, rm } from "node:fs/promises";
 import type { SQLQueryBindings } from "bun:sqlite";
@@ -489,14 +490,17 @@ export class CodexAdapter implements SessionAdapter {
       if (!threadRow) throw new Error(`Session not found: ${sessionId}`);
 
       const cwd = options.cwd || threadRow.cwd;
-      const resumeArgs = options.fork
-        ? ["codex", "fork", sessionId]
-        : ["codex", "resume", sessionId];
+      const resumeArgs = [
+        ...(options.fork
+          ? ["codex", "fork", sessionId]
+          : ["codex", "resume", sessionId]),
+        ...(options.agentArgs ?? []),
+      ];
 
       if (options.tmux) {
         const sessionName = options.tmuxSessionName || `agent-${AGENT}-${sessionId.slice(0, 8)}`;
         Bun.spawnSync(["tmux", "new-session", "-d", "-s", sessionName, "-c", cwd]);
-        Bun.spawnSync(["tmux", "send-keys", "-t", sessionName, resumeArgs.join(" "), "Enter"]);
+        Bun.spawnSync(["tmux", "send-keys", "-t", sessionName, formatShellCommand(resumeArgs), "Enter"]);
       } else {
         const proc = Bun.spawn(resumeArgs, {
           cwd,

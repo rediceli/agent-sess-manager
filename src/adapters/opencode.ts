@@ -20,6 +20,7 @@ import type {
 import { openSqliteReadOnly, openSqliteReadWrite, runInsert, queryAll, queryOne, getAgentDbPath, getAgentDataRoot } from "../utils/db.ts";
 import type { SQLQueryBindings } from "bun:sqlite";
 import { dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256, ensureDir, makeForkId } from "../utils/fs.ts";
+import { formatShellCommand } from "../utils/shell.ts";
 import { join, basename, dirname, relative } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 
@@ -483,14 +484,17 @@ const git = await getGitInfo(sessionRow.directory);
       if (!sessionRow) throw new Error(`Session not found: ${sessionId}`);
 
       const cwd = options.cwd || sessionRow.directory;
-      const resumeArgs = options.fork
-        ? ["opencode", "--fork", "-s", sessionId]
-        : ["opencode", "-s", sessionId];
+      const resumeArgs = [
+        ...(options.fork
+          ? ["opencode", "--fork", "-s", sessionId]
+          : ["opencode", "-s", sessionId]),
+        ...(options.agentArgs ?? []),
+      ];
 
       if (options.tmux) {
         const sessionName = options.tmuxSessionName || `agent-${AGENT}-${sessionId.slice(0, 8)}`;
         Bun.spawnSync(["tmux", "new-session", "-d", "-s", sessionName, "-c", cwd]);
-        Bun.spawnSync(["tmux", "send-keys", "-t", sessionName, resumeArgs.join(" "), "Enter"]);
+        Bun.spawnSync(["tmux", "send-keys", "-t", sessionName, formatShellCommand(resumeArgs), "Enter"]);
       } else {
         const proc = Bun.spawn(resumeArgs, {
           cwd,

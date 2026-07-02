@@ -128,7 +128,10 @@ agent-session delete 019e623c-c61b -a codex   # 自动匹配完整 UUID
 agent-session resume <sessionId> -a opencode
 agent-session resume <sessionId> -a claude --tmux
 agent-session resume <sessionId> -a codex --fork
+agent-session resume <sessionId> -a claude -- --dangerously-skip-permissions
 ```
+
+如果需要把额外参数直接传给底层 Agent CLI，请使用 `--` 把 `agent-session` 自己的参数和透传参数分开。
 
 ### 进程管理
 
