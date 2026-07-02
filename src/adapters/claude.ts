@@ -21,6 +21,7 @@ import { getAgentDataRoot, dirExists, fileExists, expandHome, getGitInfo, getAge
 import { join, basename, dirname, relative } from "node:path";
 import { readFile, writeFile, readdir, stat, copyFile, mkdir, rm } from "node:fs/promises";
 import { glob } from "glob";
+import { TOOL_VERSION } from "../version.ts";
 
 const AGENT: AgentType = "claude";
 
@@ -416,7 +417,7 @@ export class ClaudeAdapter implements SessionAdapter {
     }
 
     const manifest = {
-      toolVersion: "0.1.0",
+      toolVersion: TOOL_VERSION,
       agent: AGENT,
       agentVersion,
       sessionId,

@@ -23,6 +23,7 @@ import { dirExists, fileExists, expandHome, getGitInfo, getAgentVersion, sha256,
 import { formatShellCommand } from "../utils/shell.ts";
 import { join, basename, dirname, relative } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
+import { TOOL_VERSION } from "../version.ts";
 
 const AGENT: AgentType = "opencode";
 
@@ -350,7 +351,7 @@ const git = await getGitInfo(sessionRow.directory);
       }
 
       const manifest = {
-        toolVersion: "0.1.0",
+        toolVersion: TOOL_VERSION,
         agent: AGENT,
         agentVersion,
         sessionId,

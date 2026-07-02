@@ -7,6 +7,7 @@ import { OpenCodeAdapter } from "../src/adapters/opencode.ts";
 import { CodexAdapter } from "../src/adapters/codex.ts";
 import { ClaudeAdapter } from "../src/adapters/claude.ts";
 import type { ExportManifest } from "../src/types.ts";
+import { TOOL_VERSION } from "../src/version.ts";
 
 const TMP = "/tmp/agent-session-test";
 
@@ -160,7 +161,7 @@ describe("Claude Adapter", () => {
     const bundleDir = join(TMP, "claude-wrong-agent-bundle");
     await mkdir(join(bundleDir, "session-data"), { recursive: true });
     await writeFile(join(bundleDir, "manifest.json"), JSON.stringify({
-      toolVersion: "0.1.0",
+      toolVersion: TOOL_VERSION,
       agent: "codex",
       sessionId: "wrong-agent-test",
       originalCwd: "/test",
@@ -212,7 +213,7 @@ describe("Codex Adapter", () => {
     }]));
 
     await writeFile(join(bundleDir, "manifest.json"), JSON.stringify({
-      toolVersion: "0.1.0",
+      toolVersion: TOOL_VERSION,
       agent: "codex",
       sessionId: "thread_path_test",
       originalCwd: "/original/path",
@@ -321,7 +322,7 @@ describe("Fixes — regression tests", () => {
     const { sha256 } = await import("../src/utils/fs.ts");
     const checksum = sha256(await readFile(bundledJsonl));
     await writeFile(join(bundleDir, "manifest.json"), JSON.stringify({
-      toolVersion: "0.1.0",
+      toolVersion: TOOL_VERSION,
       agent: "claude",
       sessionId: oldId,
       originalCwd: "/tmp/collision",

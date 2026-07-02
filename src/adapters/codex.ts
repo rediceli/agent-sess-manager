@@ -25,6 +25,7 @@ import { join, basename, dirname, relative } from "node:path";
 import { readFile, writeFile, readdir, stat, copyFile, mkdir, rm } from "node:fs/promises";
 import type { SQLQueryBindings } from "bun:sqlite";
 import { glob } from "glob";
+import { TOOL_VERSION } from "../version.ts";
 
 const AGENT: AgentType = "codex";
 
@@ -351,7 +352,7 @@ export class CodexAdapter implements SessionAdapter {
       }
 
       const manifest = {
-        toolVersion: "0.1.0",
+        toolVersion: TOOL_VERSION,
         agent: AGENT,
         agentVersion,
         sessionId,

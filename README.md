@@ -25,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/in
 Install a specific version:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/install.sh | bash -s v0.1.0
+curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/install.sh | bash -s vYYYYMMDDNN
 ```
 
 ### From git clone
@@ -34,10 +34,13 @@ curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/in
 git clone https://github.com/rediceli/agent-sess-manager.git
 cd agent-sess-manager
 bun install
+bun run hooks:install
 bun link
 ```
 
 After linking, `agent-session` is available globally.
+
+Development versioning uses `YYYYMMDDNN`, where `NN` is the 2-digit commit sequence for that day (`00` to `99`). The `hooks:install` step enables the repo's pre-commit hook so every commit refreshes `package.json` and the CLI/manifest version together.
 
 ### Run directly (no install)
 

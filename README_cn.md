@@ -25,7 +25,7 @@ curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/in
 安装指定版本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/install.sh | bash -s v0.1.0
+curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/install.sh | bash -s vYYYYMMDDNN
 ```
 
 ### 从 git clone 安装
@@ -34,10 +34,13 @@ curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/in
 git clone https://github.com/rediceli/agent-sess-manager.git
 cd agent-sess-manager
 bun install
+bun run hooks:install
 bun link
 ```
 
 链接后 `agent-session` 即可全局使用。
+
+开发版本号采用 `YYYYMMDDNN` 格式，其中 `NN` 是当天第几次提交的两位序号（`00` 到 `99`）。`hooks:install` 会启用仓库内的 pre-commit hook，使每次提交时自动同步更新 `package.json`、CLI 和 manifest 的版本号。
 
 ### 直接运行（免安装）
 

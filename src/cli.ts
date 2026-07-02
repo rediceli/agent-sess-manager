@@ -6,6 +6,7 @@ import { resumeCommand, psCommand, attachCommand } from "./commands/resume.ts";
 import { exportCommand } from "./commands/export.ts";
 import { importCommand } from "./commands/import.ts";
 import { deleteCommand } from "./commands/delete.ts";
+import { TOOL_VERSION } from "./version.ts";
 
 export function createProgram() {
   const program = new Command();
@@ -13,7 +14,7 @@ export function createProgram() {
   program
     .name("agent-session")
     .description("Unified session management tool for OpenCode, Claude CLI, and Codex CLI")
-    .version("0.1.0");
+    .version(TOOL_VERSION);
 
   program
     .command("list")

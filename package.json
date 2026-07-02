@@ -1,6 +1,6 @@
 {
   "name": "agent-ss-mng",
-  "version": "0.1.0",
+  "version": "2026070200",
   "description": "Unified session management tool for OpenCode, Claude CLI, and Codex CLI",
   "module": "src/index.ts",
   "type": "module",
@@ -11,7 +11,9 @@
     "dev": "bun run --watch src/cli.ts",
     "build": "bun build src/cli.ts --outdir dist --target bun",
     "test": "bun test",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "bunx tsc --noEmit",
+    "bump-version": "bun run scripts/bump-version.ts",
+    "hooks:install": "git config core.hooksPath .githooks"
   },
   "dependencies": {
     "chalk": "^5.6.2",
