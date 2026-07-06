@@ -25,7 +25,28 @@ need_cmd() {
 
 need_cmd curl  "Install curl: https://curl.se/"
 need_cmd unzip "Install unzip: apt install unzip / brew install unzip"
-need_cmd bun   "Install bun: curl -fsSL https://bun.sh/install | bash"
+
+if ! command -v bun >/dev/null 2>&1; then
+  warn "'bun' is required but not installed."
+  printf "Install bun automatically? [Y/n] "
+  read -r REPLY
+  REPLY="${REPLY:-Y}"
+  if [[ "$REPLY" =~ ^[Yy]$ ]]; then
+    info "Installing bun..."
+    curl -fsSL https://bun.sh/install | bash
+    export BUN_INSTALL="$HOME/.bun"
+    export PATH="$BUN_INSTALL/bin:$PATH"
+    if command -v bun >/dev/null 2>&1; then
+      ok "bun installed successfully ($(bun --version))"
+    else
+      err "bun installation failed. Please install manually: https://bun.sh"
+      exit 1
+    fi
+  else
+    err "Install bun manually: curl -fsSL https://bun.sh/install | bash"
+    exit 1
+  fi
+fi
 
 VERSION="${1:-latest}"
 if [ "$VERSION" != "latest" ]; then

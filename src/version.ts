@@ -1,4 +1,4 @@
-export const TOOL_VERSION = "2026070200";
+export const TOOL_VERSION = "2026070500";
 
 export function formatVersionDate(date: Date): string {
   const year = String(date.getFullYear());
