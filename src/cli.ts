@@ -13,14 +13,14 @@ export function createProgram() {
 
   program
     .name("agent-session")
-    .description("Unified session management tool for OpenCode, Claude CLI, and Codex CLI")
+    .description("Unified session management tool for OpenCode, Claude CLI, Codex CLI, and Pi")
     .version(TOOL_VERSION);
 
   program
     .command("list")
     .alias("ls")
     .description("List sessions across agents")
-    .option("-a, --agent <agent>", "Filter by agent (opencode|claude|codex|all)", "all")
+    .option("-a, --agent <agent>", "Filter by agent (opencode|claude|codex|pi|all)", "all")
     .option("--cwd <path>", "Filter by working directory prefix")
     .option("-n, --limit <n>", "Max results", "50")
     .option("--subagents", "Include subagent/child sessions (hidden by default)")
@@ -30,7 +30,7 @@ export function createProgram() {
   program
     .command("show <sessionId>")
     .description("View full session conversation")
-    .requiredOption("-a, --agent <agent>", "Agent type (opencode|claude|codex)")
+    .requiredOption("-a, --agent <agent>", "Agent type (opencode|claude|codex|pi)")
     .option("-f, --format <fmt>", "Output format (markdown|json|raw)", "markdown")
     .option("--no-tools", "Hide tool calls")
     .option("--no-thinking", "Hide thinking blocks")
@@ -39,7 +39,7 @@ export function createProgram() {
   program
     .command("search <query>")
     .description("Search across session contents")
-    .option("-a, --agent <agent>", "Filter by agent (opencode|claude|codex|all)", "all")
+    .option("-a, --agent <agent>", "Filter by agent (opencode|claude|codex|pi|all)", "all")
     .option("-r, --regex", "Use regex matching")
     .option("-s, --case-sensitive", "Case-sensitive search")
     .option("-n, --limit <n>", "Max results", "20")
@@ -49,7 +49,7 @@ export function createProgram() {
   program
     .command("resume <sessionId> [agentArgs...]")
     .description("Resume a session in its native agent")
-    .requiredOption("-a, --agent <agent>", "Agent type (opencode|claude|codex)")
+    .requiredOption("-a, --agent <agent>", "Agent type (opencode|claude|codex|pi)")
     .option("--tmux", "Launch in tmux session")
     .option("--tmux-name <name>", "Custom tmux session name")
     .option("--cwd <path>", "Override working directory")
@@ -64,13 +64,13 @@ export function createProgram() {
   program
     .command("attach <sessionId>")
     .description("Attach to a running agent tmux session")
-    .requiredOption("-a, --agent <agent>", "Agent type (opencode|claude|codex)")
+    .requiredOption("-a, --agent <agent>", "Agent type (opencode|claude|codex|pi)")
     .action(attachCommand);
 
   program
     .command("export <sessionId>")
     .description("Export a session to a bundle")
-    .requiredOption("-a, --agent <agent>", "Agent type (opencode|claude|codex)")
+    .requiredOption("-a, --agent <agent>", "Agent type (opencode|claude|codex|pi)")
     .option("-o, --output <path>", "Output directory", "./session-bundle")
     .option("--include-workspace", "Include workspace directory in export")
     .option("--meta-only", "Export metadata only")
@@ -79,7 +79,7 @@ export function createProgram() {
   program
     .command("import <bundlePath>")
     .description("Import a session from a bundle")
-    .requiredOption("-a, --agent <agent>", "Agent type (opencode|claude|codex)")
+    .requiredOption("-a, --agent <agent>", "Agent type (opencode|claude|codex|pi)")
     .option("--path-mapping <pairs>", "Path mapping (oldPath=newPath,...)")
     .option("--on-conflict <strategy>", "Conflict resolution (skip|overwrite|fork)", "skip")
     .option("--dry-run", "Report conflicts without importing")
@@ -89,7 +89,7 @@ export function createProgram() {
     .command("delete <sessionId>")
     .alias("rm")
     .description("Delete a session (data only, not the workspace)")
-    .requiredOption("-a, --agent <agent>", "Agent type (opencode|claude|codex)")
+    .requiredOption("-a, --agent <agent>", "Agent type (opencode|claude|codex|pi)")
     .option("--force", "Skip confirmation prompt")
     .option("--cascade", "Also delete child/subagent sessions")
     .action(deleteCommand);

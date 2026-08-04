@@ -2,7 +2,7 @@
 
 [中文文档](README_cn.md)
 
-Unified session management CLI for OpenCode, Claude CLI, and Codex CLI. Query, view, search, export, import, and resume sessions across all three agents — without cross-agent mixing.
+Unified session management CLI for OpenCode, Claude CLI, Codex CLI, and Pi. Query, view, search, export, import, and resume sessions across all four agents — without cross-agent mixing.
 
 ## Install
 
@@ -14,7 +14,7 @@ No git clone needed — just run:
 curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/install.sh | bash
 ```
 
-This downloads the latest release, installs dependencies, and links `agent-session` to `/usr/local/bin`.
+This downloads the latest release, installs dependencies, and links `agent-session` to `/usr/local/bin` when writable, or `$HOME/.local/bin` otherwise.
 
 Custom install location:
 
@@ -40,12 +40,19 @@ bun link
 
 After linking, `agent-session` is available globally.
 
-Development versioning uses `YYYYMMDDNN`, where `NN` is the 2-digit commit sequence for that day (`00` to `99`). The `hooks:install` step enables the repo's pre-commit hook so every commit refreshes `package.json` and the CLI/manifest version together.
+Development versioning uses `YYYYMMDDNN`, where `NN` is the 2-digit commit sequence for that day (`00` to `99`). The `hooks:install` step enables the repo's pre-commit hook so every commit updates `package.json` and `src/version.ts`; the CLI and export manifests use that shared version.
 
-### Run directly (no install)
+### Run latest source (no system install)
 
 ```bash
-bunx --bun agent-ss-mng <command> [options]
+bun install
+bun run src/cli.ts <command> [options]
+```
+
+### Run published package
+
+```bash
+bunx --bun agent-session <command> [options]
 ```
 
 ### Prerequisites
@@ -65,6 +72,7 @@ agent-session <command> [options]
 ```bash
 agent-session list                           # All agents, newest first
 agent-session ls -a opencode --limit 10      # OpenCode only, top 10
+agent-session ls -a pi --limit 10             # Pi only, top 10
 agent-session ls --cwd /path/to/project      # Filter by working directory
 agent-session ls --json                      # JSON output
 ```
@@ -74,7 +82,8 @@ agent-session ls --json                      # JSON output
 ```bash
 agent-session show <sessionId> -a opencode   # Full conversation
 agent-session show <id> -a claude --no-tools # Hide tool calls
-agent-session show <id> -a codex -f json     # Raw JSON format
+agent-session show <id> -a codex -f json     # JSON output
+agent-session show <id> -a pi                # View a Pi session
 ```
 
 ### Search Sessions
@@ -90,6 +99,7 @@ agent-session search "exact" -a claude -s    # Case-sensitive, Claude only
 ```bash
 agent-session export <sessionId> -a opencode -o ./bundle
 agent-session export <sessionId> -a claude -o ./bundle --meta-only
+agent-session export <sessionId> -a pi -o ./bundle
 ```
 
 Creates a directory with `manifest.json` and `session-data/` containing native-format files.
@@ -101,6 +111,7 @@ agent-session import ./bundle -a opencode
 agent-session import ./bundle -a claude --path-mapping "/old/path=/new/path"
 agent-session import ./bundle -a codex --on-conflict fork
 agent-session import ./bundle -a opencode --dry-run
+agent-session import ./bundle -a pi --path-mapping "/old/path=/new/path"
 ```
 
 Options:
@@ -131,6 +142,7 @@ agent-session resume <sessionId> -a opencode
 agent-session resume <sessionId> -a claude --tmux
 agent-session resume <sessionId> -a codex --fork
 agent-session resume <sessionId> -a claude -- --dangerously-skip-permissions
+agent-session resume <sessionId> -a pi -- --model anthropic/claude-sonnet
 ```
 
 Use `--` to separate `agent-session` options from extra arguments you want to pass directly to the native agent CLI.
@@ -139,7 +151,7 @@ Use `--` to separate `agent-session` options from extra arguments you want to pa
 
 ```bash
 agent-session ps                  # List running agent tmux sessions
-agent-session attach <sessionId>  # Attach to a tmux session
+agent-session attach <sessionId> -a claude # Attach to a tmux session
 ```
 
 ## Architecture
@@ -153,17 +165,18 @@ src/
     opencode.ts       — OpenCode: SQLite (session/message/part tables)
     claude.ts         — Claude CLI: JSONL + project-id path mapping
     codex.ts          — Codex CLI: SQLite (threads) + JSONL rollout
-commands/
-list.ts — list/ls
-show.ts — show
-search.ts — search
-resume.ts — resume/ps/attach
-export.ts — export
-import.ts — import
-delete.ts — delete/rm
-utils/
-db.ts — bun:sqlite helpers (read-only + read-write)
-fs.ts — File/git/sha256/CJK terminal utilities
+    pi.ts             — Pi: JSONL session files
+  commands/
+    list.ts — list/ls
+    show.ts — show
+    search.ts — search
+    resume.ts — resume/ps/attach
+    export.ts — export
+    import.ts — import
+    delete.ts — delete/rm
+  utils/
+    db.ts — bun:sqlite helpers (read-only + read-write)
+    fs.ts — File/git/sha256/CJK terminal utilities
 ```
 
 ### Design Decisions
@@ -175,6 +188,7 @@ fs.ts — File/git/sha256/CJK terminal utilities
 - **Checksum verification**: Export manifest includes SHA-256 checksums verified on import
 - **Prefix ID matching**: All commands accepting `<sessionId>` support truncated/prefix IDs from `list` output
 - **CJK-aware terminal output**: Table alignment accounts for double-width CJK characters
+- **Pi session directory**: Pi uses `PI_CODING_AGENT_DIR`, `PI_CODING_AGENT_SESSION_DIR`, or `settings.json`'s `sessionDir` when configured
 
 ## Test
 
@@ -185,7 +199,7 @@ bun test
 ## Requirements
 
 - Bun >= 1.3
-- OpenCode, Claude CLI, or Codex CLI installed (for live data access)
+- OpenCode, Claude CLI, Codex CLI, or Pi installed (for live data access)
 
 ## CI
 

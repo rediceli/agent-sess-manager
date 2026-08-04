@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`agent-ss-mng` (binary `agent-session`) — a unified CLI for listing, viewing, searching, exporting, importing, resuming, and deleting sessions across three coding agents: **OpenCode**, **Claude CLI**, and **Codex CLI**. The tool reads each agent's native on-disk format directly; there is **no shared data model**.
+`agent-session` — a unified CLI for listing, viewing, searching, exporting, importing, resuming, and deleting sessions across four coding agents: **OpenCode**, **Claude CLI**, **Codex CLI**, and **Pi**. The tool reads each agent's native on-disk format directly; there is **no shared data model**.
 
 ## Commands
 
 ```bash
-bun test                          # Run the full test suite (tests/adapters.test.ts)
+bun test                          # Run the full test suite
 bun test tests/adapters.test.ts -t "list returns sessions"   # Single test by name
 bun run dev                       # Watch-mode CLI (bun run --watch src/cli.ts)
 bun run build                     # Bundle CLI to dist/cli.js
@@ -17,7 +17,7 @@ bun run typecheck                 # tsc --noEmit (strict mode, noUncheckedIndexe
 bun link                          # Install `agent-session` globally from this checkout
 ```
 
-Tests redirect `HOME` to `/tmp/agent-session-test` so adapters resolve to ephemeral fixture DBs — never against the developer's real `~/.local/share/opencode`, `~/.claude`, or `~/.codex`. When adding adapter tests, follow the same pattern (see `tests/adapters.test.ts` `beforeAll`).
+Tests redirect `HOME` to `/tmp/agent-session-test` so adapters resolve to ephemeral fixtures — never against the developer's real `~/.local/share/opencode`, `~/.claude`, `~/.codex`, or `~/.pi/agent`. When adding adapter tests, follow the same pattern (see `tests/adapters.test.ts` `beforeAll`).
 
 ## Architecture
 
@@ -38,6 +38,7 @@ Every agent integration implements `SessionAdapter`. The interface is the single
 | OpenCode | SQLite at `~/.local/share/opencode/opencode.db` | `session`, `message`, `part`, `project`; `session.parent_id` denotes subagents |
 | Claude | JSONL files at `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl` | Project directory name is the cwd with `/` → `-` (see `projectDirToPath`/`pathToProjectDir` in `adapters/claude.ts`) |
 | Codex | SQLite at `~/.codex/state_5.sqlite` + JSONL rollouts | `threads` table; `thread_spawn_edges` links parent↔child threads (subagents); rollout path stored as `~/...` and resolved via `expandHome` |
+| Pi | JSONL files at `~/.pi/agent/sessions/` | Session header plus tree entries; `parentSession` links forked session files |
 
 When adding a new adapter or feature: read the agent's data directly, do **not** introduce an intermediate cross-agent schema.
 
@@ -50,10 +51,10 @@ Agent CLIs add tables and columns between versions. Two rules to keep imports/de
 
 ### Export/import bundle format
 
-All adapters produce the same bundle layout: a directory containing `manifest.json` (toolVersion, agent, sessionId, originalCwd, exportedAt, git info, files, SHA-256 checksums) and a `session-data/` directory holding native files (`.json` rows for SQLite adapters, copied `.jsonl` for Claude/Codex rollouts). On import:
+All adapters produce the same bundle layout: a directory containing `manifest.json` (toolVersion, agent, sessionId, originalCwd, exportedAt, git info, files, SHA-256 checksums) and a `session-data/` directory holding native files (`.json` rows for SQLite adapters, copied `.jsonl` for Claude/Codex/Pi sessions). On import:
 - `manifest.agent` must match the target adapter — otherwise reject with a `schema_version` conflict.
 - Checksums in `manifest.checksums` are verified against the bundled files.
-- `pathMapping: Record<string, string>` is applied via prefix-replace to remap `originalCwd` to the target machine; both adapters use the same `remapCwd` shape (see `OpenCodeAdapter.importSession`).
+- `pathMapping: Record<string, string>` is applied via prefix-replace to remap `originalCwd` to the target machine; adapters use the same `remapCwd` shape (see `OpenCodeAdapter.importSession`).
 - `onConflict`: `skip` (default), `overwrite` (delete existing rows then insert), or `fork` (rewrite session ID in-bundle; `content.replaceAll(oldId, newId)` is used for Claude JSONL and Codex rollouts).
 - **Fork-mode IDs must not be substrings of normal text.** `replaceAll(oldId, newId)` rewrites session IDs by string match across the bundle; if the new ID happens to appear in user messages, it gets corrupted. OpenCode follows the safe pattern: `ses_imported_<Date.now()>_<oldId.slice(0,8)>` — long, prefixed, time-suffixed. Claude (`<id>_imported_<ts>`) and Codex (`019e_imported_<ts>_<slice>`) are weaker; if you touch this code, keep the prefix + timestamp pattern and never reuse a bare UUID.
 - `dryRun` must short-circuit before any writes — preserve this when extending.
@@ -66,7 +67,7 @@ All adapters produce the same bundle layout: a directory containing `manifest.js
 
 1. Implement the handler in `src/commands/<name>.ts` (call `resolveSessionId` for any session-ID argument).
 2. Register it in `src/cli.ts` with Commander — keep `requiredOption("-a, --agent ...")` for any command that targets a single agent's data.
-3. If the command needs adapter-side logic, extend the `SessionAdapter` interface in `types.ts` and implement it in all three adapters; do not branch on `agentType` in command code.
+3. If the command needs adapter-side logic, extend the `SessionAdapter` interface in `types.ts` and implement it in all adapters; do not branch on `agentType` in command code.
 
 ## Conventions
 

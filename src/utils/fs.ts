@@ -134,10 +134,14 @@ export async function getGitInfo(cwd: string): Promise<ExportManifest["git"] | u
 }
 
 export async function getAgentVersion(agent: AgentType): Promise<string | undefined> {
+  // Pi does not expose a terminating --version flag in all supported releases.
+  if (agent === "pi") return undefined;
+
   const commands: Record<AgentType, string[]> = {
     opencode: ["opencode", "--version"],
     claude: ["claude", "--version"],
     codex: ["codex", "--version"],
+    pi: [],
   };
   try {
     const proc = Bun.spawn(commands[agent], { stdout: "pipe", stderr: "pipe" });

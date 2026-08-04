@@ -4,7 +4,7 @@
  * SessionMeta is the minimal projection for CLI display only.
  */
 
-export type AgentType = "opencode" | "claude" | "codex";
+export type AgentType = "opencode" | "claude" | "codex" | "pi";
 
 export interface SessionMeta {
   agent: AgentType;

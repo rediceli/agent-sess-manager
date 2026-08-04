@@ -2,11 +2,13 @@ import type { AgentType, SessionAdapter, SessionMeta } from "./types.ts";
 import { OpenCodeAdapter } from "./adapters/opencode.ts";
 import { ClaudeAdapter } from "./adapters/claude.ts";
 import { CodexAdapter } from "./adapters/codex.ts";
+import { PiAdapter } from "./adapters/pi.ts";
 
 const adapters: Record<AgentType, SessionAdapter> = {
   opencode: new OpenCodeAdapter(),
   claude: new ClaudeAdapter(),
   codex: new CodexAdapter(),
+  pi: new PiAdapter(),
 };
 
 export function getAdapter(agent: AgentType): SessionAdapter {

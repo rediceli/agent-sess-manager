@@ -62,6 +62,13 @@ export function getAgentDataRoot(agent: AgentType): string {
       return `${home}/.claude`;
     case "codex":
       return `${home}/.codex`;
+    case "pi": {
+      const configured = process.env.PI_CODING_AGENT_DIR;
+      if (configured) {
+        return configured.replace(/^~(?=\/|$)/, home);
+      }
+      return `${home}/.pi/agent`;
+    }
   }
 }
 

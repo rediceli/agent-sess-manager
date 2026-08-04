@@ -6,6 +6,7 @@ import { mkdirSync, existsSync } from "node:fs";
 import { OpenCodeAdapter } from "../src/adapters/opencode.ts";
 import { CodexAdapter } from "../src/adapters/codex.ts";
 import { ClaudeAdapter } from "../src/adapters/claude.ts";
+import { PiAdapter } from "../src/adapters/pi.ts";
 import type { ExportManifest } from "../src/types.ts";
 import { TOOL_VERSION } from "../src/version.ts";
 
@@ -13,6 +14,8 @@ const TMP = "/tmp/agent-session-test";
 
 // We set HOME to TMP so that getAgentDbPath() resolves to our test DBs
 const ORIGINAL_HOME = process.env.HOME || "";
+const ORIGINAL_PI_AGENT_DIR = process.env.PI_CODING_AGENT_DIR;
+const ORIGINAL_PI_SESSION_DIR = process.env.PI_CODING_AGENT_SESSION_DIR;
 
 async function cleanTmp() {
   await rm(TMP, { recursive: true, force: true });
@@ -88,12 +91,34 @@ beforeAll(async () => {
   ].join("\n");
   await writeFile(join(claudeDir, "claude_test1.jsonl"), jsonlContent);
 
+  const piSessionDir = join(TMP, ".pi", "agent", "sessions", "--test-pi-project--");
+  await mkdir(piSessionDir, { recursive: true });
+  const piSessionPath = join(piSessionDir, "2026-05-25T010000.000Z_pi_test1.jsonl");
+  const piContent = [
+    JSON.stringify({ type: "session", version: 3, id: "pi_test1", timestamp: "2026-05-25T01:00:00.000Z", cwd: "/test/pi-project" }),
+    JSON.stringify({ type: "session_info", id: "00000001", parentId: null, timestamp: "2026-05-25T01:00:01.000Z", name: "Named Pi Session" }),
+    JSON.stringify({ type: "message", id: "00000002", parentId: "00000001", timestamp: "2026-05-25T01:00:02.000Z", message: { role: "user", content: "Hello Pi" } }),
+    JSON.stringify({ type: "message", id: "00000003", parentId: "00000002", timestamp: "2026-05-25T01:00:03.000Z", message: { role: "assistant", provider: "anthropic", model: "claude-sonnet", content: [{ type: "thinking", thinking: "Think first" }, { type: "text", text: "Hi from Pi!" }, { type: "toolCall", id: "call_1", name: "bash", arguments: { command: "echo test" } }], usage: { totalTokens: 42 } } }),
+    JSON.stringify({ type: "message", id: "00000004", parentId: "00000003", timestamp: "2026-05-25T01:00:04.000Z", message: { role: "toolResult", toolCallId: "call_1", toolName: "bash", content: [{ type: "text", text: "tool result" }], isError: false } }),
+    JSON.stringify({ type: "message", id: "00000005", parentId: "00000004", timestamp: "2026-05-25T01:00:05.000Z", message: { role: "bashExecution", command: "echo test", output: "command output", exitCode: 0, cancelled: false, truncated: false } }),
+    JSON.stringify({ type: "model_change", id: "00000006", parentId: "00000005", timestamp: "2026-05-25T01:00:06.000Z", provider: "openai", modelId: "gpt-5" }),
+    JSON.stringify({ type: "compaction", id: "00000007", parentId: "00000006", timestamp: "2026-05-25T01:00:07.000Z", summary: "Earlier context summary", tokensBefore: 100 }),
+    JSON.stringify({ type: "custom_message", id: "00000008", parentId: "00000007", timestamp: "2026-05-25T01:00:08.000Z", customType: "test-extension", content: "Extension context" , display: true }),
+  ].join("\n");
+  await writeFile(piSessionPath, piContent);
+
   // Redirect HOME so all adapters resolve to test data
   process.env.HOME = TMP;
+  process.env.PI_CODING_AGENT_DIR = join(TMP, ".pi", "agent");
+  delete process.env.PI_CODING_AGENT_SESSION_DIR;
 });
 
 afterAll(async () => {
   process.env.HOME = ORIGINAL_HOME;
+  if (ORIGINAL_PI_AGENT_DIR === undefined) delete process.env.PI_CODING_AGENT_DIR;
+  else process.env.PI_CODING_AGENT_DIR = ORIGINAL_PI_AGENT_DIR;
+  if (ORIGINAL_PI_SESSION_DIR === undefined) delete process.env.PI_CODING_AGENT_SESSION_DIR;
+  else process.env.PI_CODING_AGENT_SESSION_DIR = ORIGINAL_PI_SESSION_DIR;
   await cleanTmp();
 });
 
@@ -232,6 +257,95 @@ describe("Codex Adapter", () => {
 
     expect(result.success).toBe(true);
     expect(result.warnings.some((w) => w.includes("/original/path") && w.includes("/new/path"))).toBe(true);
+  });
+});
+
+describe("Pi Adapter", () => {
+  test("lists and normalizes Pi session entries", async () => {
+    const adapter = new PiAdapter();
+    const sessions = await adapter.list({ limit: 10 });
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      agent: "pi",
+      id: "pi_test1",
+      title: "Named Pi Session",
+      cwd: "/test/pi-project",
+      model: "openai/gpt-5",
+      tokensUsed: 42,
+      messageCount: 4,
+    });
+
+    const detail = await adapter.show("pi_test1");
+    expect(detail.messages.some((message) => message.role === "user" && message.content === "Hello Pi")).toBe(true);
+    expect(detail.messages.some((message) => message.role === "assistant" && message.content === "Hi from Pi!" && message.thinking === "Think first")).toBe(true);
+    expect(detail.messages.some((message) => message.role === "tool" && message.toolName === "bash" && message.content === "command output")).toBe(true);
+    expect(detail.messages.some((message) => message.role === "system" && message.content.includes("Earlier context summary"))).toBe(true);
+
+    const withoutTools = await adapter.show("pi_test1", { includeTools: false, includeThinking: false });
+    expect(withoutTools.messages.every((message) => message.role !== "tool")).toBe(true);
+    expect(withoutTools.messages.find((message) => message.role === "assistant")?.thinking).toBeUndefined();
+  });
+
+  test("searches tool output and supports configured session directories", async () => {
+    const adapter = new PiAdapter();
+    const results = await adapter.search({ query: "command output" });
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ agent: "pi", sessionId: "pi_test1", role: "tool" });
+
+    const customDir = join(TMP, "custom-pi-sessions");
+    await mkdir(customDir, { recursive: true });
+    const customPath = join(customDir, "2026-05-25T020000.000Z_pi_custom.jsonl");
+    await writeFile(customPath, [
+      JSON.stringify({ type: "session", version: 3, id: "pi_custom", timestamp: "2026-05-25T02:00:00.000Z", cwd: "/test/custom" }),
+      JSON.stringify({ type: "message", id: "10000001", parentId: null, timestamp: "2026-05-25T02:00:01.000Z", message: { role: "user", content: "Custom session" } }),
+    ].join("\n"));
+
+    process.env.PI_CODING_AGENT_SESSION_DIR = customDir;
+    try {
+      const configuredSessions = await adapter.list();
+      expect(configuredSessions.map((session) => session.id)).toEqual(["pi_custom"]);
+    } finally {
+      delete process.env.PI_CODING_AGENT_SESSION_DIR;
+    }
+  });
+
+  test("exports and imports a fork with Pi header/path remapping", async () => {
+    const adapter = new PiAdapter();
+    const exportDir = join(TMP, "export-pi");
+    await adapter.exportSession("pi_test1", { output: exportDir });
+
+    const manifest = JSON.parse(await readFile(join(exportDir, "manifest.json"), "utf-8")) as ExportManifest;
+    expect(manifest.agent).toBe("pi");
+    expect(manifest.sessionId).toBe("pi_test1");
+
+    const result = await adapter.importSession({
+      bundlePath: exportDir,
+      pathMapping: { "/test/pi-project": "/test/imported-pi" },
+      onConflict: "fork",
+    });
+    expect(result.success).toBe(true);
+    expect(result.sessionId).not.toBe("pi_test1");
+    expect(result.warnings.some((warning) => warning.includes("Path remapped"))).toBe(true);
+
+    const imported = await adapter.show(result.sessionId);
+    expect(imported.meta.cwd).toBe("/test/imported-pi");
+    expect(imported.meta.title).toBe("Named Pi Session");
+    expect(imported.rawMeta?.parentSession).toContain("pi_test1.jsonl");
+  });
+
+  test("deletes Pi child sessions with cascade", async () => {
+    const adapter = new PiAdapter();
+    const rootPath = join(TMP, ".pi", "agent", "sessions", "--test-pi-project--", "2026-05-25T030000.000Z_pi_delete_root.jsonl");
+    const childPath = join(TMP, ".pi", "agent", "sessions", "--test-pi-project--", "2026-05-25T030001.000Z_pi_delete_child.jsonl");
+    await writeFile(rootPath, JSON.stringify({ type: "session", version: 3, id: "pi_delete_root", timestamp: "2026-05-25T03:00:00.000Z", cwd: "/test/pi-project" }));
+    await writeFile(childPath, JSON.stringify({ type: "session", version: 3, id: "pi_delete_child", timestamp: "2026-05-25T03:00:01.000Z", cwd: "/test/pi-project", parentSession: rootPath }));
+
+    const result = await adapter.deleteSession("pi_delete_root", { cascade: true });
+    expect(result.deleted).toBe(true);
+    expect(result.childrenDeleted).toBe(1);
+    expect(existsSync(rootPath)).toBe(false);
+    expect(existsSync(childPath)).toBe(false);
   });
 });
 

@@ -15,17 +15,18 @@ Hard-won pitfalls when working on this repo. Read before editing adapters, termi
 - `importSession` constructs `targetProjectDir` via `pathToProjectDir(targetCwd)`. That's fine for *placing* the file (the encoding is deterministic forward), but any later "read back the cwd from the path" code will be wrong.
 - When debugging "session not found" against a path with dashes, decode by looking inside the JSONL, not by parsing the directory name.
 
-## Shell injection in resume/tmux paths
+## Shell safety in resume/tmux paths
 
-All three adapters launch the agent via:
+All adapters keep the working directory separate from the command arguments:
 
 ```ts
-Bun.spawn(["bash", "-c", `cd "${cwd}" && ${resumeCmd}`], ...)
+Bun.spawn(resumeArgs, { cwd, ... })
 // or via tmux:
-Bun.spawnSync(["bash", "-c", `tmux send-keys -t "${name}" "${resumeCmd}" Enter`])
+Bun.spawnSync(["tmux", "new-session", "-d", "-s", name, "-c", cwd])
+Bun.spawnSync(["tmux", "send-keys", "-t", name, formatShellCommand(resumeArgs), "Enter"])
 ```
 
-`cwd` comes from the database and is **not sanitized**. A directory containing `"`, `` ` ``, `$(...)`, or `;` will execute. Today the surface is small (sessions tend to live in well-formed paths), but if you extend resume/attach to take user-supplied values, use array-form `Bun.spawn(["cmd", "arg", ...], { cwd })` and pass `cwd` as an option, not as part of an interpolated `bash -c` string.
+Keep this array-form spawning and `formatShellCommand` quoting when changing resume or tmux support. Do not put database or user-supplied `cwd` values into an interpolated `bash -c` command.
 
 ## tmux session naming is load-bearing
 
@@ -35,14 +36,14 @@ Bun.spawnSync(["bash", "-c", `tmux send-keys -t "${name}" "${resumeCmd}" Enter`]
 - `ps` filters `tmux list-sessions` output by `agent-` prefix.
 - `attach` reconstructs the same name from `(agent, sessionId)` to locate the session.
 
-Don't change the format, the prefix, or the slice length without updating all three call sites. If you need to allow user-named sessions (`--tmux-name`), `attach` won't find them — that's by design today, but if you fix it, fix it in `ps`/`attach` together.
+Don't change the format, the prefix, or the slice length without updating all adapter call sites. If you need to allow user-named sessions (`--tmux-name`), `attach` won't find them — that's by design today, but if you fix it, fix it in `ps`/`attach` together.
 
 ## Test harness mutates global state
 
 `tests/adapters.test.ts` sets `process.env.HOME = "/tmp/agent-session-test"` in `beforeAll` and restores it in `afterAll`. Implications:
 
 - **Tests in this repo are not concurrency-safe.** Do not run them with `--concurrency` >1, and do not introduce parallel test files that depend on `HOME`.
-- New adapter tests must follow the same pattern: redirect `HOME`, plant fixtures under it, restore in teardown. Reading the real `~/.local/share/opencode` would destroy a developer's data.
+- New adapter tests must follow the same pattern: redirect `HOME`, plant fixtures under it, restore in teardown. Reading the real `~/.local/share/opencode`, `~/.claude`, `~/.codex`, or `~/.pi/agent` would destroy a developer's data.
 - If you ever add tests that *don't* need this redirection, isolate them into a separate file so a future `bun test --concurrency` doesn't trip the env mutation.
 
 ## CJK + ANSI width

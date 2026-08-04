@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-OpenCode、Claude CLI 和 Codex CLI 的统一会话管理命令行工具。支持跨三种 Agent 的会话查询、查看、搜索、导出、导入、恢复和删除——不同 Agent 的会话数据互不混用。
+OpenCode、Claude CLI、Codex CLI 和 Pi 的统一会话管理命令行工具。支持跨四种 Agent 的会话查询、查看、搜索、导出、导入、恢复和删除——不同 Agent 的会话数据互不混用。
 
 ## 安装
 
@@ -14,7 +14,7 @@ OpenCode、Claude CLI 和 Codex CLI 的统一会话管理命令行工具。支�
 curl -fsSL https://raw.githubusercontent.com/rediceli/agent-sess-manager/main/install.sh | bash
 ```
 
-自动下载最新版本、安装依赖，并将 `agent-session` 链接到 `/usr/local/bin`。
+自动下载最新版本、安装依赖；如果 `/usr/local/bin` 可写，则将 `agent-session` 链接到这里，否则链接到 `$HOME/.local/bin`。
 
 自定义安装路径：
 
@@ -40,12 +40,19 @@ bun link
 
 链接后 `agent-session` 即可全局使用。
 
-开发版本号采用 `YYYYMMDDNN` 格式，其中 `NN` 是当天第几次提交的两位序号（`00` 到 `99`）。`hooks:install` 会启用仓库内的 pre-commit hook，使每次提交时自动同步更新 `package.json`、CLI 和 manifest 的版本号。
+开发版本号采用 `YYYYMMDDNN` 格式，其中 `NN` 是当天第几次提交的两位序号（`00` 到 `99`）。`hooks:install` 会启用仓库内的 pre-commit hook，使每次提交时更新 `package.json` 和 `src/version.ts`；CLI 与导出 manifest 使用同一版本号。
 
-### 直接运行（免安装）
+### 运行最新源码（不安装到系统）
 
 ```bash
-bunx --bun agent-ss-mng <命令> [选项]
+bun install
+bun run src/cli.ts <命令> [选项]
+```
+
+### 运行已发布版本
+
+```bash
+bunx --bun agent-session <命令> [选项]
 ```
 
 ### 前置条件
@@ -65,6 +72,7 @@ agent-session <命令> [选项]
 ```bash
 agent-session list                     # 所有 Agent，按时间倒序
 agent-session ls -a opencode --limit 10  # 仅 OpenCode，前 10 条
+agent-session ls -a pi --limit 10         # 仅 Pi，前 10 条
 agent-session ls --cwd /path/to/project  # 按工作目录筛选
 agent-session ls --subagents            # 显示子会话（默认隐藏）
 agent-session ls --json                 # JSON 格式输出
@@ -75,7 +83,8 @@ agent-session ls --json                 # JSON 格式输出
 ```bash
 agent-session show <sessionId> -a opencode       # 查看完整对话
 agent-session show <id> -a claude --no-tools     # 隐藏工具调用
-agent-session show <id> -a codex -f json         # 原始 JSON 格式
+agent-session show <id> -a codex -f json         # JSON 格式输出
+agent-session show <id> -a pi                    # 查看 Pi 会话
 ```
 
 ### 搜索会话
@@ -91,6 +100,7 @@ agent-session search "精确匹配" -a claude -s   # 区分大小写，仅 Claud
 ```bash
 agent-session export <sessionId> -a opencode -o ./bundle
 agent-session export <sessionId> -a claude -o ./bundle --meta-only
+agent-session export <sessionId> -a pi -o ./bundle
 ```
 
 生成包含 `manifest.json` 和 `session-data/` 的目录，其中保存了原生格式的会话数据文件。
@@ -102,6 +112,7 @@ agent-session import ./bundle -a opencode
 agent-session import ./bundle -a claude --path-mapping "/旧路径=/新路径"
 agent-session import ./bundle -a codex --on-conflict fork
 agent-session import ./bundle -a opencode --dry-run
+agent-session import ./bundle -a pi --path-mapping "/旧路径=/新路径"
 ```
 
 选项：
@@ -132,6 +143,7 @@ agent-session resume <sessionId> -a opencode
 agent-session resume <sessionId> -a claude --tmux
 agent-session resume <sessionId> -a codex --fork
 agent-session resume <sessionId> -a claude -- --dangerously-skip-permissions
+agent-session resume <sessionId> -a pi -- --model anthropic/claude-sonnet
 ```
 
 如果需要把额外参数直接传给底层 Agent CLI，请使用 `--` 把 `agent-session` 自己的参数和透传参数分开。
@@ -140,7 +152,7 @@ agent-session resume <sessionId> -a claude -- --dangerously-skip-permissions
 
 ```bash
 agent-session ps                          # 列出正在运行的 Agent tmux 会话
-agent-session attach <sessionId>          # 接入 tmux 会话
+agent-session attach <sessionId> -a claude # 接入 tmux 会话
 ```
 
 ## 架构
@@ -154,6 +166,7 @@ src/
     opencode.ts   — OpenCode：SQLite（session/message/part 表）
     claude.ts     — Claude CLI：JSONL + project-id 路径映射
     codex.ts      — Codex CLI：SQLite（threads）+ JSONL rollout
+    pi.ts         — Pi：JSONL 会话文件
   commands/
     list.ts       — list/ls
     show.ts       — show
@@ -176,6 +189,7 @@ src/
 - **校验和验证**：导出 manifest 包含 SHA-256 校验和，导入时自动验证
 - **会话 ID 前缀匹配**：所有接受 `<sessionId>` 的命令均支持 `list` 输出中的截断/前缀 ID
 - **中日韩终端适配**：表格对齐考虑双宽度 CJK 字符的显示宽度
+- **Pi 会话目录**：Pi 支持 `PI_CODING_AGENT_DIR`、`PI_CODING_AGENT_SESSION_DIR`，以及 `settings.json` 中的 `sessionDir`
 
 ## 测试
 
@@ -186,7 +200,7 @@ bun test
 ## 依赖
 
 - Bun >= 1.3
-- 已安装 OpenCode、Claude CLI 或 Codex CLI（用于访问实际数据）
+- 已安装 OpenCode、Claude CLI、Codex CLI 或 Pi（用于访问实际数据）
 
 ## 持续集成
 
