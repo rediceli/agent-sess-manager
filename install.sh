@@ -28,13 +28,21 @@ need_cmd unzip "Install unzip: apt install unzip / brew install unzip"
 
 if ! command -v bun >/dev/null 2>&1; then
   warn "'bun' is required but not installed."
-  printf "Install bun automatically? [Y/n] "
-  read -r REPLY
+  if [[ ! -r /dev/tty || ! -w /dev/tty ]]; then
+    err "Cannot prompt for Bun installation: no interactive terminal is available. Install Bun manually: https://bun.sh"
+    exit 1
+  fi
+
+  printf "Install bun automatically? [Y/n] " > /dev/tty
+  if ! read -r REPLY < /dev/tty; then
+    err "Could not read the Bun installation confirmation. Install Bun manually: https://bun.sh"
+    exit 1
+  fi
   REPLY="${REPLY:-Y}"
   if [[ "$REPLY" =~ ^[Yy]$ ]]; then
     info "Installing bun..."
+    export BUN_INSTALL="${BUN_INSTALL:-$HOME/.bun}"
     curl -fsSL https://bun.sh/install | bash
-    export BUN_INSTALL="$HOME/.bun"
     export PATH="$BUN_INSTALL/bin:$PATH"
     if command -v bun >/dev/null 2>&1; then
       ok "bun installed successfully ($(bun --version))"

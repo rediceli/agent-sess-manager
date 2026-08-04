@@ -1,6 +1,6 @@
 {
   "name": "agent-ss-mng",
-  "version": "2026070500",
+  "version": "2026080300",
   "description": "Unified session management tool for OpenCode, Claude CLI, and Codex CLI",
   "module": "src/index.ts",
   "type": "module",
